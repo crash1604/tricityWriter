@@ -1,0 +1,29 @@
+{
+  "name": "@tricity/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "e2e:connector": "tsx e2e/connector.e2e.ts"
+  },
+  "dependencies": {
+    "@tricity/ai": "workspace:*",
+    "@tricity/db": "workspace:*",
+    "@tricity/shared": "workspace:*",
+    "@tricity/wp-client": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "sanitize-html": "^2.18.1",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/sanitize-html": "^2.16.2",
+    "tsx": "^4.23.15"
+  }
+}

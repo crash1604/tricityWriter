@@ -1,0 +1,26 @@
+{
+  "name": "tricity-writer",
+  "private": true,
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "db:generate": "pnpm --filter @tricity/db db:generate",
+    "db:migrate": "pnpm --filter @tricity/db db:migrate",
+    "wp:dev": "npx @wp-playground/cli@latest start --path=plugins/tricity-writer --php=7.4 --skip-browser --no-login"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.3",
+    "@types/node": "^26.6.5",
+    "turbo": "^2.11.10",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

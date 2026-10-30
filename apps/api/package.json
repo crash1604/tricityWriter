@@ -1,0 +1,31 @@
+{
+  "name": "@tricity/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@tricity/ai": "workspace:*",
+    "@tricity/core": "workspace:*",
+    "@tricity/db": "workspace:*",
+    "@tricity/jobs": "workspace:*",
+    "@tricity/shared": "workspace:*",
+    "@tricity/wp-client": "workspace:*",
+    "better-auth": "^1.7.14",
+    "bullmq": "^6.4.2",
+    "fastify": "^5.12.7",
+    "ioredis": "^6.0.0",
+    "zod": "^4.6.7"
+  }
+}

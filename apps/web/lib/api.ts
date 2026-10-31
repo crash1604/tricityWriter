@@ -149,6 +149,7 @@ export interface ModelsResponse {
   models: Model[];
   defaults: { text: string | null; image: string | null };
   fake: boolean;
+  ownKeys: ('anthropic' | 'openai')[];
 }
 
 export interface AutoblogProfile {
@@ -190,8 +191,21 @@ export interface UsageSummary {
   totals: { inputTokens: number; outputTokens: number; images: number; costUsd: number };
 }
 
+export type Role = 'owner' | 'admin' | 'member';
+
 export interface Me {
   user: { id: string; name: string; email: string };
   organizationId: string;
+  role: Role;
+  // false = no email provider: invitations and reset links are not emailed.
+  emailDelivery: boolean;
   organizations: { id: string; name: string; slug: string }[];
 }
+
+export interface AiKey {
+  provider: 'anthropic' | 'openai';
+  last4: string;
+  updatedAt: string;
+}
+
+export const isAdmin = (me: Me | undefined) => me?.role === 'owner' || me?.role === 'admin';

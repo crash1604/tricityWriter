@@ -3,6 +3,7 @@ import { ConnectorError } from '@tricity/wp-client';
 
 export type AppErrorCode =
   | 'unauthorized'
+  | 'forbidden'
   | 'not_found'
   | 'invalid'
   | 'conflict'
@@ -14,6 +15,7 @@ export type AppErrorCode =
 
 const STATUS: Record<AppErrorCode, number> = {
   unauthorized: 401,
+  forbidden: 403,
   not_found: 404,
   invalid: 400,
   conflict: 409,

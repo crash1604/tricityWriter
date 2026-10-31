@@ -10,3 +10,5 @@ coverage/
 !.env.example
 .DS_Store
 plugins/*/vendor/
+apps/web/public/downloads/
+deploy/.env

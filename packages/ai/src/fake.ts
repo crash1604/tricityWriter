@@ -27,6 +27,8 @@ export class FakeProvider implements TextProvider, ImageProvider {
     };
   }
 
+  async verifyKey(): Promise<void> {}
+
   async generateImage(_model: ModelSpec, _credential: unknown, request: ImageRequest): Promise<ImageResult> {
     const [width, height] = request.size.split('x').map(Number) as [number, number];
     const hue = [...request.prompt].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);

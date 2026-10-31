@@ -17,13 +17,13 @@
     "@tricity/db": "workspace:*",
     "@tricity/shared": "workspace:*",
     "@tricity/wp-client": "workspace:*",
-    "drizzle-orm": "^0.45.4",
     "sanitize-html": "^2.18.1",
     "sharp": "^0.35.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/sanitize-html": "^2.16.2",
+    "drizzle-orm": "^0.45.4",
     "tsx": "^4.23.15"
   }
 }

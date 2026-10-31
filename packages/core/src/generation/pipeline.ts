@@ -1,8 +1,9 @@
-import { AiError, type UsageRecord } from '@tricity/ai';
+import { AiError, type OrgKeys, type UsageRecord } from '@tricity/ai';
 import { forOrg, type Generation, type GenerationImage, type OrgScope } from '@tricity/db';
 import type { GenerateJob, PublishJob, UpsertPost } from '@tricity/shared';
 import { ConnectorError } from '@tricity/wp-client';
 import { ZodError } from 'zod';
+import { orgKeys } from '../ai-keys';
 import type { Actor, CoreDeps } from '../deps';
 import { AppError, errorMessage, invalid, notFound } from '../errors';
 import { isUuid } from '../ids';
@@ -216,10 +217,11 @@ async function generateArticle(
   const warnings: string[] = [];
   const meter = (usage: UsageRecord) => scope.usage.record({ ...usage, siteId: site.id, generationId: generation.id });
 
-  const textModel = input.textModel ?? deps.ai.defaultModel('text')?.id;
+  const keys = await orgKeys(deps, scope.orgId);
+  const textModel = input.textModel ?? deps.ai.defaultModel('text', keys)?.id;
   if (!textModel)
     throw new AppError('ai_unavailable', 'No text model is available. Add an Anthropic or OpenAI API key.');
-  const imageModel = input.imageModel ?? deps.ai.defaultModel('image')?.id ?? null;
+  const imageModel = input.imageModel ?? deps.ai.defaultModel('image', keys)?.id ?? null;
   const wantsImages = input.featuredImage || input.inlineImages > 0;
   if (wantsImages && !imageModel)
     warnings.push('Images were skipped: no image model is available (add an OpenAI API key).');
@@ -246,6 +248,7 @@ async function generateArticle(
     textModel,
     { system, prompt, maxOutputTokens: Math.max(16000, input.words * 6) },
     meter,
+    keys,
   );
   const article = parseArticle(result.text);
 
@@ -269,6 +272,7 @@ async function generateArticle(
     input.imageStyle,
     meter,
     warnings,
+    keys,
   );
 
   const inline = new Map(stored.filter((s) => s.slot > 0).map((s) => [s.slot, s]));
@@ -299,6 +303,7 @@ async function generateImages(
   style: string,
   meter: (usage: UsageRecord) => Promise<void>,
   warnings: string[],
+  keys: OrgKeys,
 ): Promise<GeneratedImageSlot[]> {
   await scope.images.removeAll(generationId);
   if (!model) return [];
@@ -306,7 +311,7 @@ async function generateImages(
   const results = await Promise.allSettled(
     slots.map(async (slot) => {
       const prompt = `${slot.prompt}${style.trim() ? `. Style: ${style.trim()}` : ''}. No text, letters, logos or watermarks.`;
-      const image = await deps.ai.generateImage(model, { prompt, size: '1536x1024' }, meter);
+      const image = await deps.ai.generateImage(model, { prompt, size: '1536x1024' }, meter, keys);
       const optimized = await optimizeImage(image.data);
       await scope.images.put({
         generationId,
@@ -418,17 +423,18 @@ function parseInput(value: unknown): GenerationInput {
 }
 
 async function validateChoices(deps: CoreDeps, actor: Actor, input: GenerationInput): Promise<void> {
+  const keys = await orgKeys(deps, actor.orgId);
   for (const [id, kind] of [
     [input.textModel, 'text'],
     [input.imageModel, 'image'],
   ] as const) {
     if (!id) continue;
-    const model = deps.ai.models().find((m) => m.id === id);
+    const model = deps.ai.models(keys).find((m) => m.id === id);
     if (!model || model.kind !== kind) throw invalid(`Unknown ${kind} model: ${id}`);
     if (!model.available)
       throw new AppError('ai_unavailable', `${model.label} is not available: its API key is missing.`);
   }
-  if (!input.textModel && !deps.ai.defaultModel('text')) {
+  if (!input.textModel && !deps.ai.defaultModel('text', keys)) {
     throw new AppError('ai_unavailable', 'No text model is available. Add an Anthropic or OpenAI API key.');
   }
   for (const id of [input.contentTemplateId, input.designTemplateId]) {

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useModels } from '../../../components/options';
+import { AccountSettings, AiKeysSettings, ConnectedApps, WorkspaceSettings } from '../../../components/settings';
 import { timeAgo } from '../../../components/status';
 import { Badge, Button, Card, EmptyState, ErrorText, Field, Input, Loading, PageHeader } from '../../../components/ui';
 import { api, type McpKey, type UsageSummary } from '../../../lib/api';
@@ -12,7 +13,13 @@ export default function SettingsPage() {
     <>
       <PageHeader title="Settings" />
       <div className="space-y-6">
+        <WorkspaceSettings />
+        <AiKeysSettings />
         <McpSettings />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <ConnectedApps />
+          <AccountSettings />
+        </div>
         <div className="grid gap-6 lg:grid-cols-2">
           <Models />
           <Usage />

@@ -57,6 +57,14 @@ export class AnthropicProvider implements TextProvider {
     }
   }
 
+  async verifyKey(apiKey: string): Promise<void> {
+    try {
+      await new Anthropic({ apiKey, maxRetries: 0 }).models.list({ limit: 1 });
+    } catch (error) {
+      throw toAiError(error);
+    }
+  }
+
   private client(apiKey: string): Anthropic {
     let client = this.clients.get(apiKey);
     if (!client) {

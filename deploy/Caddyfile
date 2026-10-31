@@ -1,0 +1,21 @@
+# Front door for the stack. SITE_ADDRESS is ":80" (plain HTTP on the server IP) or a domain such as
+# app.example.com, for which Caddy obtains and renews a Let's Encrypt certificate automatically.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		-Server
+	}
+
+	# Auth, REST, MCP and OAuth discovery go straight to the API; everything else is the dashboard.
+	@api path /api/* /mcp /mcp/* /.well-known/oauth-* /.well-known/openid-configuration*
+	handle @api {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

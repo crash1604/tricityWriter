@@ -1,5 +1,6 @@
 import { forOrg } from '@tricity/db';
 import type { ListPostsQuery, Media, Post, SeoFields, Term, UpsertPost } from '@tricity/shared';
+import { orgKeys } from './ai-keys';
 import type { Actor, CoreDeps } from './deps';
 import { AppError, invalid } from './errors';
 import { optimizeImage } from './generation/images';
@@ -52,7 +53,8 @@ export async function generateFeaturedImage(
   postId: number,
   options: { prompt?: string; model?: string } = {},
 ): Promise<Media> {
-  const model = options.model ?? deps.ai.defaultModel('image')?.id;
+  const keys = await orgKeys(deps, actor.orgId);
+  const model = options.model ?? deps.ai.defaultModel('image', keys)?.id;
   if (!model) throw new AppError('ai_unavailable', 'No image model is available. Add an OpenAI API key.');
 
   return withSite(deps, actor, siteId, async (wp, site) => {
@@ -60,8 +62,11 @@ export async function generateFeaturedImage(
     const prompt =
       options.prompt ?? `Editorial photograph for an article titled "${post.title}". No text, no logos, no watermarks.`;
     const scope = forOrg(deps.db, actor.orgId);
-    const image = await deps.ai.generateImage(model, { prompt, size: '1536x1024' }, (usage) =>
-      scope.usage.record({ ...usage, siteId: site.id }),
+    const image = await deps.ai.generateImage(
+      model,
+      { prompt, size: '1536x1024' },
+      (usage) => scope.usage.record({ ...usage, siteId: site.id }),
+      keys,
     );
     const optimized = await optimizeImage(image.data);
     const media = await wp.uploadMedia({

@@ -8,6 +8,7 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().min(1, 'ENCRYPTION_KEY is required (openssl rand -base64 32)'),
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  ALLOW_PLATFORM_KEYS: z.stringbool().default(true),
   AI_FAKE: z.stringbool().default(false),
   GENERATION_CONCURRENCY: z.coerce.number().int().min(1).default(4),
 });
@@ -20,4 +21,4 @@ export function loadConfig(): Config {
   return { ...env, encryptionKey: parseEncryptionKey(env.ENCRYPTION_KEY) };
 }
 
-export const USER_AGENT = 'TriCityWriter/0.1 (+https://github.com/tricity-writer)';
+export const USER_AGENT = 'TriCityWriter/0.2 (+https://github.com/tricity-writer)';

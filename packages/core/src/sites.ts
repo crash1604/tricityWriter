@@ -1,6 +1,7 @@
 import { forOrg, type Site } from '@tricity/db';
 import type { StatusResponse } from '@tricity/shared';
 import { ConnectorClient, ConnectorError } from '@tricity/wp-client';
+import { requireAdmin } from './access';
 import { decryptSecret, encryptSecret } from './crypto';
 import type { Actor, CoreDeps } from './deps';
 import { AppError, notFound, toAppError } from './errors';
@@ -166,6 +167,7 @@ export async function updateSite(
 
 // Removes the site here and, best effort, revokes our connection on the WordPress side.
 export async function removeSite(deps: CoreDeps, actor: Actor, siteId: string): Promise<void> {
+  requireAdmin(actor);
   const site = await getSite(deps, actor, siteId);
   if (site.tokenCiphertext) {
     await siteClient(deps, site)

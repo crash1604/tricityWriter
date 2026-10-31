@@ -61,6 +61,14 @@ export class OpenAIProvider implements TextProvider, ImageProvider {
     }
   }
 
+  async verifyKey(apiKey: string): Promise<void> {
+    try {
+      await new OpenAI({ apiKey, maxRetries: 0 }).models.list();
+    } catch (error) {
+      throw toAiError(error);
+    }
+  }
+
   private client(apiKey: string): OpenAI {
     let client = this.clients.get(apiKey);
     if (!client) {

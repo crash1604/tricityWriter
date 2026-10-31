@@ -22,6 +22,7 @@ const illustrator: ModelSpec = {
 };
 
 const stubText: TextProvider = {
+  async verifyKey() {},
   async generateText() {
     return {
       text: 'hello',
@@ -101,6 +102,39 @@ describe('AiService', () => {
       ['fake', 0],
       ['fake', 0],
     ]);
+  });
+
+  it("prefers the workspace's own key and records who paid", async () => {
+    const seen: string[] = [];
+    const recording: TextProvider = {
+      ...stubText,
+      async generateText(model, credential, request) {
+        seen.push(credential.apiKey);
+        return stubText.generateText(model, credential, request);
+      },
+    };
+    const ai = new AiService({
+      models: [writer],
+      platformKeys: { anthropic: 'platform' },
+      textProviders: { anthropic: recording },
+    });
+    const owners: string[] = [];
+    await ai.generateText('writer', { system: '', prompt: 'p' }, (u) => void owners.push(u.credentialOwner), {
+      anthropic: 'org-key',
+    });
+    await ai.generateText('writer', { system: '', prompt: 'p' }, (u) => void owners.push(u.credentialOwner));
+
+    expect(seen).toEqual(['org-key', 'platform']);
+    expect(owners).toEqual(['org', 'platform']);
+  });
+
+  it('can require workspaces to bring their own keys', async () => {
+    const ai = new AiService({ models: [writer], platformKeys: { anthropic: 'platform' }, allowPlatformKeys: false });
+    expect(ai.defaultModel('text')).toBeUndefined();
+    expect(ai.defaultModel('text', { anthropic: 'org-key' })?.id).toBe('writer');
+    await expect(ai.generateText('writer', { system: '', prompt: 'p' }, () => {})).rejects.toMatchObject({
+      code: 'no_credential',
+    });
   });
 
   it('rejects using a text model for images', async () => {

@@ -16,7 +16,10 @@ describe.skipIf(!url)('api (integration)', () => {
   const wp = fakeWordPress();
   const { jobs, calls } = recordingJobs();
   const deps = testDeps({ db, jobs, fetch: wp.fetch });
-  const app = buildApp({ deps, auth: createAuth({ db, secret: 'x'.repeat(40), baseURL: ORIGIN }) });
+  const sent: { to: string; subject: string; text: string }[] = [];
+  const mailer = { delivers: false, send: async (email: (typeof sent)[number]) => void sent.push(email) };
+  const auth = createAuth({ db, secret: 'x'.repeat(40), baseURL: ORIGIN, mailer });
+  const app = buildApp({ deps, auth, mailer, origin: ORIGIN });
 
   async function signUp(): Promise<string> {
     const email = `user-${randomUUID()}@example.com`;
@@ -190,6 +193,111 @@ describe.skipIf(!url)('api (integration)', () => {
     const run = await app.inject({ method: 'POST', url: `/api/v1/sites/${siteId}/autoblog/run`, headers: as(alice) });
     expect(run.statusCode).toBe(202);
     expect(calls.at(-1)).toMatchObject({ kind: 'autoblogRun', job: { siteId, manual: true } });
+  });
+
+  it('resets a forgotten password through the emailed link', async () => {
+    const email = `reset-${randomUUID()}@example.com`;
+    await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-up/email',
+      headers: { origin: ORIGIN, 'content-type': 'application/json' },
+      payload: { email, password: 'original password', name: 'Reset Me' },
+    });
+    const request = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request-password-reset',
+      headers: { origin: ORIGIN, 'content-type': 'application/json' },
+      payload: { email, redirectTo: `${ORIGIN}/reset-password` },
+    });
+    expect(request.statusCode, request.body).toBe(200);
+    const mail = sent.find((m) => m.to === email);
+    const link = mail?.text.match(/https?:\/\/\S+/)?.[0] ?? '';
+    expect(link).toContain('/reset-password');
+
+    // The emailed link redirects to the dashboard page with the token.
+    const follow = await app.inject({ method: 'GET', url: new URL(link).pathname + new URL(link).search });
+    const token = new URL(String(follow.headers.location), ORIGIN).searchParams.get('token') ?? '';
+    expect(token).not.toBe('');
+
+    const reset = await app.inject({
+      method: 'POST',
+      url: '/api/auth/reset-password',
+      headers: { origin: ORIGIN, 'content-type': 'application/json' },
+      payload: { newPassword: 'brand new password', token },
+    });
+    expect(reset.statusCode, reset.body).toBe(200);
+    const signIn = await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-in/email',
+      headers: { origin: ORIGIN, 'content-type': 'application/json' },
+      payload: { email, password: 'brand new password' },
+    });
+    expect(signIn.statusCode).toBe(200);
+  });
+
+  it('invites teammates by link and limits members to content work', async () => {
+    const me = (await app.inject({ method: 'GET', url: '/api/v1/me', headers: as(alice) })).json();
+    expect(me.role).toBe('owner');
+
+    const inviteeEmail = `invitee-${randomUUID()}@example.com`;
+    const invite = await app.inject({
+      method: 'POST',
+      url: '/api/auth/organization/invite-member',
+      headers: { ...as(alice), 'content-type': 'application/json' },
+      payload: { email: inviteeEmail, role: 'member', organizationId: me.organizationId },
+    });
+    expect(invite.statusCode, invite.body).toBe(200);
+    const invitationId = invite.json().id;
+    expect(sent.find((m) => m.to === inviteeEmail)?.text).toContain(`/accept-invite/${invitationId}`);
+
+    const signUpRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-up/email',
+      headers: { origin: ORIGIN, 'content-type': 'application/json' },
+      payload: { email: inviteeEmail, password: 'correct horse battery', name: 'Invitee' },
+    });
+    const invitee = signUpRes.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    const accept = await app.inject({
+      method: 'POST',
+      url: '/api/auth/organization/accept-invitation',
+      headers: { ...as(invitee), 'content-type': 'application/json' },
+      payload: { invitationId },
+    });
+    expect(accept.statusCode, accept.body).toBe(200);
+    await app.inject({
+      method: 'POST',
+      url: '/api/auth/organization/set-active',
+      headers: { ...as(invitee), 'content-type': 'application/json' },
+      payload: { organizationId: me.organizationId },
+    });
+
+    const inviteeMe = (await app.inject({ method: 'GET', url: '/api/v1/me', headers: as(invitee) })).json();
+    expect(inviteeMe).toMatchObject({ organizationId: me.organizationId, role: 'member' });
+    expect(inviteeMe.organizations).toHaveLength(2);
+
+    // Members see the workspace's sites but cannot change workspace-wide settings.
+    const sites = (await app.inject({ method: 'GET', url: '/api/v1/sites', headers: as(invitee) })).json().sites;
+    expect(sites.map((s: { id: string }) => s.id)).toContain(siteId);
+    const setKey = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/ai-keys/anthropic',
+      headers: as(invitee),
+      payload: { apiKey: 'sk-ant-0123456789abcdefghij' },
+    });
+    expect(setKey.statusCode).toBe(403);
+    expect(
+      (await app.inject({ method: 'DELETE', url: `/api/v1/sites/${siteId}`, headers: as(invitee) })).statusCode,
+    ).toBe(403);
+
+    const ownerKey = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/ai-keys/anthropic',
+      headers: as(alice),
+      payload: { apiKey: 'sk-ant-0123456789abcdefghij' },
+    });
+    expect(ownerKey.statusCode, ownerKey.body).toBe(200);
+    const models = (await app.inject({ method: 'GET', url: '/api/v1/models', headers: as(invitee) })).json();
+    expect(models.ownKeys).toEqual(['anthropic']);
   });
 
   it('serves MCP tools to holders of a key', async () => {

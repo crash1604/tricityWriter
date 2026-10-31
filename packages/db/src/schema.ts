@@ -171,6 +171,22 @@ export const autoblogTopics = pgTable(
   (t) => [index('autoblog_topics_site_status_idx').on(t.siteId, t.status, t.createdAt)],
 );
 
+// A workspace's own AI provider key (BYOK). Used instead of the platform key for that provider.
+export const aiCredentials = pgTable(
+  'ai_credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    provider: text('provider', { enum: ['anthropic', 'openai'] }).notNull(),
+    // AES-GCM encrypted with the platform key; only the last four characters are ever shown.
+    keyCiphertext: text('key_ciphertext').notNull(),
+    keyLast4: text('key_last4').notNull(),
+    createdBy: text('created_by'),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('ai_credentials_org_provider_idx').on(t.orgId, t.provider)],
+);
+
 // Bearer keys for the MCP endpoint. Only a SHA-256 hash is stored.
 export const mcpKeys = pgTable(
   'mcp_keys',
@@ -219,5 +235,6 @@ export type GenerationImage = typeof generationImages.$inferSelect;
 export type AutoblogProfile = typeof autoblogProfiles.$inferSelect;
 export type AutoblogTopic = typeof autoblogTopics.$inferSelect;
 export type McpKey = typeof mcpKeys.$inferSelect;
+export type AiCredential = typeof aiCredentials.$inferSelect;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type NewUsageEvent = typeof usageEvents.$inferInsert;

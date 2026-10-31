@@ -15,6 +15,7 @@ const deps: CoreDeps = {
     anthropicKey: config.ANTHROPIC_API_KEY,
     openaiKey: config.OPENAI_API_KEY,
     fake: config.AI_FAKE,
+    allowPlatformKeys: config.ALLOW_PLATFORM_KEYS,
   }),
   jobs,
   encryptionKey: config.encryptionKey,

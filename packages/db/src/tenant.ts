@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, isNull, sql, sum } from 'drizzle-orm';
 import type { Db } from './client';
 import {
+  aiCredentials,
   autoblogProfiles,
   autoblogTopics,
   generationImages,
@@ -315,6 +316,35 @@ export function forOrg(db: Db, orgId: string) {
           .set({ revokedAt: new Date() })
           .where(and(eq(mcpKeys.orgId, orgId), eq(mcpKeys.id, id), isNull(mcpKeys.revokedAt)))
           .returning({ id: mcpKeys.id });
+        return rows.length > 0;
+      },
+    },
+
+    aiCredentials: {
+      list() {
+        return db
+          .select()
+          .from(aiCredentials)
+          .where(eq(aiCredentials.orgId, orgId))
+          .orderBy(asc(aiCredentials.provider));
+      },
+      async upsert(
+        provider: 'anthropic' | 'openai',
+        values: { keyCiphertext: string; keyLast4: string; createdBy?: string },
+      ) {
+        return one(
+          await db
+            .insert(aiCredentials)
+            .values({ ...values, provider, orgId })
+            .onConflictDoUpdate({ target: [aiCredentials.orgId, aiCredentials.provider], set: values })
+            .returning(),
+        );
+      },
+      async remove(provider: 'anthropic' | 'openai') {
+        const rows = await db
+          .delete(aiCredentials)
+          .where(and(eq(aiCredentials.orgId, orgId), eq(aiCredentials.provider, provider)))
+          .returning({ id: aiCredentials.id });
         return rows.length > 0;
       },
     },

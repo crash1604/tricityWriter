@@ -59,6 +59,8 @@ export interface ImageResult {
 
 export interface TextProvider {
   generateText(model: ModelSpec, credential: Credential, request: TextRequest): Promise<TextResult>;
+  // Throws AiError('no_credential') when the provider rejects the key.
+  verifyKey(apiKey: string): Promise<void>;
 }
 
 export interface ImageProvider {

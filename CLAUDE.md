@@ -4,24 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-**v1 built 2026-10-28.** Working end to end, checked in a browser against WordPress Playground with `AI_FAKE=true`:
+**v1 built 2026-10-28, extended 2026-10-30.**
+
+Checked in a browser against WordPress Playground with `AI_FAKE=true` (2026-10-28):
 
 - sign-up with a workspace
 - site pairing
 - the 4-step wizard → review/edit → publish/update/schedule
 - SEO meta via Yoast, Rank Math or AIOSEO, or our own head tags
-- auto-blogging with schedules and policies
-- MCP over HTTP with bearer keys
+- auto-blogging
+- MCP with bearer keys
 - usage metering
 
-**Not yet run:** real Anthropic and OpenAI calls. The adapters are written and typecheck against the SDKs, but no keys have been used.
+Added 2026-10-30, covered by integration tests and clicked through in headless Chrome against the local dev stack (2026-10-30), including a full MCP sign-in with workspace choice, consent, token use and revocation:
 
-**Deferred:** see the Decisions section below, plus:
+- workspace roles, members and link-based invites
+- password reset and change, with a pluggable mailer
+- per-workspace AI keys (BYOK)
+- MCP sign-in via OAuth 2.1
+- Docker/Caddy deployment for a GoDaddy VPS (`deploy/`, `docs/deploy-godaddy.md`)
 
-- MCP OAuth (only bearer keys exist)
-- workspace invitations UI
+**Not yet run:**
+
+- real Anthropic and OpenAI calls (no keys used yet)
+- the Docker images: never built. Local development runs without Docker by choice, so the first build happens on the VPS
+
+**Deferred:**
+
 - billing
-- per-org keys
+- an email provider beyond the Resend driver (`EMAIL_PROVIDER=none` logs emails)
+- Application Password connections
 
 If a decision changes, update this file in the same change.
 
@@ -55,7 +67,11 @@ The research lives in `docs/research/`, starting at `README.md`. `implications.m
 | Repo | pnpm workspaces + Turborepo monorepo |
 | Data | Postgres + Drizzle; Redis for BullMQ |
 | Auth / tenancy | Better Auth with the organization plugin; **organizations = tenants**. Each sign-up gets its own workspace |
-| AI keys | Platform-held Anthropic + OpenAI keys (v1). `usage_events.credential_owner` already distinguishes `platform`/`org` for BYOK later |
+| AI keys | Per-workspace keys (`ai_credentials`, encrypted) take precedence over platform keys. `ALLOW_PLATFORM_KEYS=false` makes BYOK mandatory. `usage_events.credential_owner` records who paid |
+| Roles | Better Auth member roles: owner, admin, member. Only owners and admins can change AI keys or remove sites (`requireAdmin`). Members do content work |
+| Email | `apps/api/src/mailer.ts`: `none` (log), or `resend`. Invitations always have a copyable `/accept-invite/<id>` link |
+| MCP auth | Bearer `tcw_mcp_…` keys always. OAuth 2.1 via `@better-auth/mcp` (+ CIMD, open dynamic client registration) only when `WEB_ORIGIN` is https or loopback |
+| Hosting | Single VPS (GoDaddy): Docker Compose with Postgres, Redis, migrate, api, worker, web, and Caddy (automatic HTTPS) |
 | Models | Claude Opus 5.5 is the default writer (also Sonnet 5.5, Haiku 5.5, GPT-5.5, GPT-5.4 mini). Images use GPT Image 2 / GPT Image 1 mini |
 | Connecting sites | Connector plugin only, with pairing codes. Application Password connections are deferred |
 | Output | Sanitized semantic HTML with theme-safe inline styles (see `generation/prompt.ts`), stored in classic `post_content` |
@@ -64,12 +80,11 @@ The research lives in `docs/research/`, starting at `README.md`. `implications.m
 | Local | WordPress Playground CLI (no Docker); Homebrew Postgres 18 + Redis |
 | Tooling | TypeScript 7 (native `tsc`), Biome, Vitest, tsup, Tailwind v4, TanStack Query |
 
-**Deferred:**
+**Deferred (product):**
 - rewriting/improving existing posts
 - WooCommerce
 - menus, widgets, site settings
 - Search Console
-- per-org keys
 - billing
 - i18n/RTL
 - analytics UI
@@ -87,7 +102,9 @@ packages/ai      AiService: model registry, Anthropic/OpenAI/fake providers, usa
 packages/jobs    BullMQ JobQueue implementation and per-site job schedulers
 packages/shared  Zod contracts: connector API, queue/job payloads; `/env` = server-only .env loader
 packages/wp-client  ConnectorClient: the only code that calls WordPress sites
-plugins/tricity-writer   PHP connector plugin (not a pnpm workspace)
+plugins/tricity-writer   PHP connector plugin (not a pnpm workspace); zipped by scripts/build-plugin-zip.sh
+deploy/          docker-compose.yml, Caddyfile, bootstrap-vps.sh, init-env.sh, deploy.sh, backup.sh
+Dockerfile       targets "server" (api + worker + migrate) and "web" (Next standalone)
 ```
 
 ### Invariants that span packages
@@ -98,6 +115,7 @@ plugins/tricity-writer   PHP connector plugin (not a pnpm workspace)
 - **One path to WordPress:** only `ConnectorClient` talks to sites. Core wraps it in `withSite()`, which marks the site `disconnected` when the token is rejected.
 - **Connector contract:** defined in `packages/shared/src/connector.ts` and mirrored by `plugins/tricity-writer/src/Rest/*`. Change both together. All writes use POST, because hosts and WAFs block PUT/PATCH/DELETE.
 - **REST and MCP share core:** they call the same core functions; MCP adds nothing of its own. HTML from assistants is sanitized with `sanitizeArticleHtml` like generated HTML.
+- **Roles:** `Actor.role` is set by `requireSession` (sessions) and by MCP auth (keys and OAuth tokens), always from a fresh membership lookup. A user removed from a workspace loses REST, MCP-key and OAuth access immediately.
 - **Errors:** core throws `AppError` with user-safe messages and an HTTP status. `toAppError()` maps `ConnectorError` and `AiError`. Anything else is a 500.
 
 ### Key flows
@@ -120,9 +138,20 @@ plugins/tricity-writer   PHP connector plugin (not a pnpm workspace)
    - **AIOSEO:** its `Models\Post` (own table) plus `_aioseo_*` meta.
    - **No SEO plugin:** our `_tcw_seo_*` meta, printed as a `<meta name="description">` and the document title.
 5. **MCP:**
-   - Keys: `tcw_mcp_…` bearer keys, stored as SHA-256 and created in Settings.
-   - Server: stateless Streamable HTTP with JSON responses.
-   - Tools: 19, listed in `apps/api/src/mcp.ts`. `create_post` costs no AI credits; `generate_article` queues a job.
+   - Server: stateless Streamable HTTP via the SDK's web-standard transport (`apps/api/src/mcp.ts`).
+   - Tools: 19. `create_post` costs no AI credits; `generate_article` queues a job.
+   - Auth: `tcw_mcp_…` bearer keys (SHA-256 in `mcp_keys`), or OAuth access tokens. Both resolve to an `Actor`.
+6. **MCP sign-in (OAuth)** (`apps/api/src/auth.ts`, `oauth.ts`):
+   1. An unauthenticated `/mcp` request gets a 401 with an RFC 9728 `resource_metadata` challenge.
+   2. Discovery documents are served at the domain root, under `/.well-known/oauth-*` and `/.well-known/openid-configuration*`.
+   3. The client registers (dynamic registration or CIMD), then authorizes at `/api/auth/oauth2/authorize`.
+   4. Users with several workspaces choose one at `/oauth/workspace` (`postLogin`). `consentReferenceId` is the active workspace.
+   5. Consent happens at `/oauth/consent`.
+   6. The token is a JWT whose audience is `${WEB_ORIGIN}/mcp` and which carries an `org_id` claim (`customAccessTokenClaims`). `/mcp` verifies it in-process against the local JWKS, with no network call.
+7. **Invites and resets:**
+   - Invites use Better Auth's organization endpoints, called from the dashboard (`components/settings.tsx`).
+   - `/accept-invite/[id]` requires signing in with the invited email.
+   - Reset links come from `sendResetPassword` → the mailer.
 
 ## Connector plugin conventions (`plugins/tricity-writer`)
 
@@ -156,6 +185,12 @@ pnpm --filter @tricity/core test src/generation/generation.test.ts   # one test 
 pnpm --filter @tricity/api test -t "MCP"                              # tests matching a name
 pnpm --filter @tricity/core e2e:connector [--seo=yoast|rankmath|aioseo] [--php=8.3]
                              # plugin e2e against a throwaway Playground site (needs network for SEO plugins)
+scripts/build-plugin-zip.sh  # dist/tricity-writer.zip + apps/web/public/downloads/ (served by the dashboard)
+
+# Production (see docs/deploy-godaddy.md)
+ssh root@IP 'bash -s' < deploy/bootstrap-vps.sh   # once per server
+deploy/deploy.sh root@IP [domain]                 # ship and (re)start; keeps the server's deploy/.env
+docker compose -f deploy/docker-compose.yml up -d --build   # on the server, or locally with HTTP_PORT=8080
 ```
 
 `AI_FAKE=true` in `.env` serves every AI call from the built-in fake: placeholder articles and SVG images, with cost 0. Set it to `false` and fill in `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` for real generation.
@@ -173,6 +208,15 @@ pnpm --filter @tricity/core e2e:connector [--seo=yoast|rankmath|aioseo] [--php=8
 - **Integration tests:** suites in `db`, `core` and `api` use `TEST_DATABASE_URL`, are skipped when it's unset, and run in parallel.
   - Use unique org ids per suite and never truncate tables.
   - Migrations take a Postgres advisory lock (`migrateDatabase`).
+- **Never rotate `BETTER_AUTH_SECRET` on a live install:** it encrypts the JWKS private keys, so OAuth breaks. Never rotate `ENCRYPTION_KEY` either: it encrypts site tokens and AI keys. Every test suite must use the same auth secret (`'x'.repeat(40)`) for the same reason.
+- **OAuth quirks:**
+  - The mcp plugin requires an https resource URL (http only on loopback). `oauthEnabled()` gates the plugins and routes.
+  - Loopback redirect URIs are accepted only for `application_type: 'native'` clients.
+  - The token endpoint is form-encoded, so `buildApp` registers a raw `application/x-www-form-urlencoded` parser.
+  - The protected-resource metadata is answered by the plugin's `onRequest` hook, so `oauth.ts` must forward the original root path.
+- **`oauthProviderClient`** attaches the signed OAuth query to every non-GET auth request while the page URL has a `sig` parameter. That's how sign-in, consent and workspace selection continue the flow.
+- **Docker:** the build reinstalls production deps with `--config.node-linker=hoisted`. Bundled apps import external packages (sharp, fastify, …) that pnpm's strict layout would hide from them. `MIGRATIONS_DIR` points `migrateDatabase` at the copied migrations.
+- **Routing:** Caddy routes `/api/*`, `/mcp` and the OAuth `/.well-known` paths to the API; everything else goes to the web app. Next rewrites mirror this for dev. Next can't use partial-segment patterns like `oauth-:rest*`.
 - **Images in posts:** inline `<img>` tags need `style="width:100%;height:auto"`. Themes don't constrain raw-HTML images, so without it they overflow the content column (seen on Twenty Twenty-Five).
 - **Playground:**
   - `wp:dev` uses `--no-login`. Auto-login 302-redirects every cookieless request, including our server-to-server REST calls.

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { forOrg, system } from '@tricity/db';
+import { memberRole } from './access';
 import { sha256 } from './crypto';
 import type { Actor, CoreDeps } from './deps';
 import { invalid, notFound } from './errors';
@@ -33,13 +34,16 @@ export async function revokeMcpKey(deps: CoreDeps, actor: Actor, id: string): Pr
   }
 }
 
-// Resolves a bearer key to the org and user it acts as, or null.
+// Resolves a bearer key to the org and user it acts as, or null. A key stops working when its user
+// leaves the workspace.
 export async function verifyMcpKey(deps: CoreDeps, key: string): Promise<Required<Actor> | null> {
   if (!key.startsWith(PREFIX)) return null;
   const record = await system.findMcpKeyByHash(deps.db, sha256(key));
   if (!record) return null;
+  const role = await memberRole(deps.db, record.orgId, record.userId);
+  if (!role) return null;
   if (!record.lastUsedAt || Date.now() - record.lastUsedAt.getTime() > 60_000) {
     await system.touchMcpKey(deps.db, record.id);
   }
-  return { orgId: record.orgId, userId: record.userId };
+  return { orgId: record.orgId, userId: record.userId, role };
 }

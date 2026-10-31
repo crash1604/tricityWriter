@@ -1,15 +1,20 @@
 import {
+  AI_PROVIDERS,
   addAutoblogTopics,
   autoblogProfileSchema,
+  availableModels,
   createMcpKey,
   createTemplate,
   deleteTemplate,
   getAutoblog,
+  listAiKeys,
   listMcpKeys,
   listTemplates,
+  removeAiKey,
   removeAutoblogTopic,
   revokeMcpKey,
   saveAutoblog,
+  setAiKey,
   triggerAutoblogRun,
   updateTemplate,
   usageSummary,
@@ -22,7 +27,7 @@ import { actor, parse } from '../http';
 
 const kindSchema = z.enum(['content', 'design']);
 
-export function workspaceRoutes(app: FastifyInstance, { deps, auth }: AppDeps): void {
+export function workspaceRoutes(app: FastifyInstance, { deps, auth, mailer }: AppDeps): void {
   app.get('/me', async (request) => {
     const headers = fromNodeHeaders(request.headers);
     const session = await auth.api.getSession({ headers });
@@ -30,15 +35,27 @@ export function workspaceRoutes(app: FastifyInstance, { deps, auth }: AppDeps): 
     return {
       user: session && { id: session.user.id, name: session.user.name, email: session.user.email },
       organizationId: actor(request).orgId,
+      role: actor(request).role,
+      emailDelivery: mailer.delivers,
       organizations: organizations.map((o) => ({ id: o.id, name: o.name, slug: o.slug })),
     };
   });
 
-  app.get('/models', async () => ({
-    models: deps.ai.models(),
-    defaults: { text: deps.ai.defaultModel('text')?.id ?? null, image: deps.ai.defaultModel('image')?.id ?? null },
-    fake: deps.ai.isFake,
-  }));
+  app.get('/models', async (request) => availableModels(deps, actor(request)));
+
+  // Workspace AI keys (BYOK). Owners and admins only; keys are verified with the provider first.
+  const providerParams = z.object({ provider: z.enum(AI_PROVIDERS as ['anthropic', 'openai']) });
+  app.get('/ai-keys', async (request) => ({ keys: await listAiKeys(deps, actor(request)) }));
+  app.put('/ai-keys/:provider', async (request) => {
+    const { provider } = parse(providerParams, request.params);
+    const { apiKey } = parse(z.object({ apiKey: z.string() }), request.body);
+    return { key: await setAiKey(deps, actor(request), provider, apiKey) };
+  });
+  app.delete('/ai-keys/:provider', async (request, reply) => {
+    const { provider } = parse(providerParams, request.params);
+    await removeAiKey(deps, actor(request), provider);
+    return reply.code(204).send();
+  });
 
   app.get('/usage', async (request) => usageSummary(deps, actor(request)));
 

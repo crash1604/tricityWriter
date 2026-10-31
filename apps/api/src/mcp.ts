@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   type Actor,
   AppError,
@@ -29,6 +29,7 @@ import {
 import type { UpsertPost } from '@tricity/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { sendResponse, toFetchRequest } from './http';
 
 // MCP tools call the same core services as the REST routes, so tenant scoping and the connector's
 // permissions are identical. HTML supplied by an assistant is sanitized like generated HTML.
@@ -392,28 +393,47 @@ export function createMcpServer(deps: CoreDeps, actor: Actor, version: string): 
 }
 
 // Stateless Streamable HTTP: a fresh server and transport per request, so any API instance can
-// serve any request. Authenticated with bearer MCP keys created in the dashboard.
-export function registerMcp(app: FastifyInstance, deps: CoreDeps, version: string): void {
+// serve any request. Accepts bearer MCP keys (created in Settings) and, when MCP sign-in is enabled,
+// OAuth access tokens issued by our authorization server.
+export interface McpAuth {
+  verifyOAuthToken?: (token: string) => Promise<Required<Actor> | null>;
+  // RFC 9728 metadata URL advertised to unauthenticated clients so they can start OAuth.
+  resourceMetadataUrl?: string;
+}
+
+export function registerMcp(app: FastifyInstance, deps: CoreDeps, version: string, auth: McpAuth = {}): void {
   app.post('/mcp', async (request, reply) => {
     const header = request.headers.authorization ?? '';
-    const key = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
-    const actor = key ? await verifyMcpKey(deps, key) : null;
+    const token = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
+    const actor = !token
+      ? null
+      : token.startsWith('tcw_mcp_')
+        ? await verifyMcpKey(deps, token)
+        : ((await auth.verifyOAuthToken?.(token)) ?? null);
+
     if (!actor) {
+      const challenge = auth.resourceMetadataUrl
+        ? `Bearer resource_metadata="${auth.resourceMetadataUrl}"${token ? ', error="invalid_token"' : ''}`
+        : 'Bearer realm="tricity-writer"';
       return reply
         .code(401)
-        .header('www-authenticate', 'Bearer realm="tricity-writer"')
-        .send({ jsonrpc: '2.0', error: { code: -32001, message: 'Missing or invalid MCP key.' }, id: null });
+        .header('www-authenticate', challenge)
+        .send({ jsonrpc: '2.0', error: { code: -32001, message: 'Missing or invalid credentials.' }, id: null });
     }
 
     const server = createMcpServer(deps, actor, version);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    reply.raw.on('close', () => {
-      void transport.close();
-      void server.close();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
     });
-    await server.connect(transport);
-    reply.hijack();
-    await transport.handleRequest(request.raw, reply.raw, request.body);
+    try {
+      await server.connect(transport);
+      const response = await transport.handleRequest(toFetchRequest(request), { parsedBody: request.body });
+      return await sendResponse(reply, response);
+    } finally {
+      await transport.close();
+      await server.close();
+    }
   });
 
   const methodNotAllowed = async (_request: unknown, reply: FastifyReply) =>

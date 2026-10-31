@@ -1,0 +1,119 @@
+# Production stack for a single server (e.g. a GoDaddy VPS). See docs/deploy-godaddy.md.
+#   docker compose -f deploy/docker-compose.yml up -d --build
+# Variables come from deploy/.env (create it with deploy/init-env.sh).
+name: tricity
+
+x-server: &server
+  build:
+    context: ..
+    target: server
+  image: tricity-server:latest
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DATABASE_URL: postgres://tricity:${POSTGRES_PASSWORD}@postgres:5432/tricity
+    REDIS_URL: redis://redis:6379
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tricity
+      POSTGRES_USER: tricity
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run deploy/init-env.sh first}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tricity -d tricity"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Job queues must never lose entries: persist and refuse to evict.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *server
+    restart: "no"
+    command: ["node", "apps/api/dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *server
+    command: ["node", "apps/api/dist/index.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    <<: *server
+    command: ["node", "apps/worker/dist/index.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      target: web
+      args:
+        API_INTERNAL_URL: http://api:4000
+    image: tricity-web:latest
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      # ":80" serves plain HTTP on the server's IP. A domain (app.example.com) gets automatic HTTPS.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

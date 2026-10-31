@@ -42,8 +42,11 @@ export default function SitesPage() {
           <div className="grid gap-8 md:grid-cols-2">
             <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-600">
               <li>
-                Install and activate the <strong>TriCity Writer Connector</strong> plugin on your site (upload{' '}
-                <code className="rounded bg-slate-100 px-1">plugins/tricity-writer</code> as a zip).
+                <a href="/downloads/tricity-writer.zip" className="font-medium text-brand-600 hover:underline">
+                  Download the TriCity Writer Connector plugin
+                </a>
+                , then in WordPress go to <strong>Plugins → Add New → Upload Plugin</strong>, upload the zip and
+                activate it.
               </li>
               <li>
                 In WordPress admin, open <strong>TriCity Writer</strong>, name the connection and click{' '}

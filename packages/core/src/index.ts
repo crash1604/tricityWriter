@@ -1,6 +1,8 @@
 // Domain services shared by apps/api (REST + MCP) and apps/worker. Every function takes CoreDeps and,
 // for user-initiated work, an Actor that pins it to one organization.
+export { memberRole, type Role, requireAdmin } from './access';
 export { createAiService } from './ai';
+export * from './ai-keys';
 export * from './autoblog';
 export * from './crypto';
 export type { Actor, CoreDeps, JobQueue } from './deps';

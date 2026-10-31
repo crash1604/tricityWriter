@@ -19,7 +19,9 @@ export async function migrateDatabase(url: string): Promise<void> {
   const sql = postgres(url, { max: 1, onnotice: () => {} });
   try {
     await sql`select pg_advisory_lock(${MIGRATION_LOCK})`;
-    await migrate(drizzle(sql), { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
+    // Bundled apps (apps/api/dist) set MIGRATIONS_DIR; in the workspace the folder sits next to src/.
+    const migrationsFolder = process.env.MIGRATIONS_DIR ?? new URL('../drizzle', import.meta.url).pathname;
+    await migrate(drizzle(sql), { migrationsFolder });
     await sql`select pg_advisory_unlock(${MIGRATION_LOCK})`;
   } finally {
     await sql.end();

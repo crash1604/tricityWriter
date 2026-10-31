@@ -1,31 +1,17 @@
-import { AppError } from '@tricity/core';
+import { AppError, memberRole } from '@tricity/core';
 import type { Db } from '@tricity/db';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Auth } from './auth';
+import { sendResponse, toFetchRequest } from './http';
 
 // Bridges Fastify to Better Auth's fetch handler at /api/auth/*.
 export function registerAuthRoutes(app: FastifyInstance, auth: Auth): void {
   app.route({
     method: ['GET', 'POST'],
     url: '/api/auth/*',
-    async handler(request: FastifyRequest, reply: FastifyReply) {
-      const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
-      const response = await auth.handler(
-        new Request(url, {
-          method: request.method,
-          headers: fromNodeHeaders(request.headers),
-          body: request.method === 'GET' || request.body === undefined ? undefined : JSON.stringify(request.body),
-        }),
-      );
-      reply.status(response.status);
-      response.headers.forEach((value, key) => {
-        if (key !== 'set-cookie') reply.header(key, value);
-      });
-      const cookies = response.headers.getSetCookie();
-      if (cookies.length) reply.header('set-cookie', cookies);
-      return reply.send(response.body ? await response.text() : null);
-    },
+    handler: async (request: FastifyRequest, reply: FastifyReply) =>
+      sendResponse(reply, await auth.handler(toFetchRequest(request))),
   });
 }
 
@@ -48,6 +34,9 @@ export function requireSession(auth: Auth, db: Db) {
       await auth.api.setActiveOrganization({ headers, body: { organizationId: membership.organizationId } });
       orgId = membership.organizationId;
     }
-    request.actor = { orgId, userId: session.user.id };
+
+    const role = await memberRole(db, orgId, session.user.id);
+    if (!role) throw new AppError('forbidden', 'You are no longer a member of this workspace.');
+    request.actor = { orgId, userId: session.user.id, role };
   };
 }

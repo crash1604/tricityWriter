@@ -11,10 +11,14 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
+    "drizzle-orm": "^0.45.4",
     "tsup": "^9.0.0",
     "tsx": "^4.23.15"
   },
   "dependencies": {
+    "@better-auth/cimd": "1.7.14",
+    "@better-auth/mcp": "1.7.14",
+    "@better-auth/oauth-provider": "1.7.14",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@tricity/ai": "workspace:*",
     "@tricity/core": "workspace:*",
@@ -26,6 +30,8 @@
     "bullmq": "^6.4.2",
     "fastify": "^5.12.7",
     "ioredis": "^6.0.0",
+    "jose": "^6.2.14",
+    "pino": "^10.4.0",
     "zod": "^4.6.7"
   }
 }

@@ -43,18 +43,24 @@ export function Button({
 }
 
 const FIELD =
-  'block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:outline-none';
+  'block rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:outline-none';
+
+// Full width unless the caller sets one (w-28…): with two width classes, Tailwind's CSS order decides
+// which wins, not the order in className.
+function field(className: string | undefined, ...extra: string[]) {
+  return cx(FIELD, /(^|\s)w-/.test(className ?? '') ? null : 'w-full', ...extra, className);
+}
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cx(FIELD, props.className)} />;
+  return <input {...props} className={field(props.className)} />;
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={cx(FIELD, 'min-h-24', props.className)} />;
+  return <textarea {...props} className={field(props.className, 'min-h-24')} />;
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={cx(FIELD, 'pr-8', props.className)} />;
+  return <select {...props} className={field(props.className, 'pr-8')} />;
 }
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {

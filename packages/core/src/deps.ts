@@ -25,4 +25,6 @@ export interface CoreDeps {
 export interface Actor {
   orgId: string;
   userId?: string;
+  // Role in the workspace; absent for system work (worker jobs).
+  role?: 'owner' | 'admin' | 'member';
 }

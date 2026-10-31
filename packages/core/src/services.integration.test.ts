@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { createDb, forOrg, migrateDatabase } from '@tricity/db';
+import { createDb, forOrg, member, migrateDatabase, organization, user } from '@tricity/db';
 import { loadRootEnv } from '@tricity/shared/env';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { availableModels, listAiKeys, orgKeys, removeAiKey, setAiKey } from './ai-keys';
 import { addAutoblogTopics, getAutoblog, runAutoblog, saveAutoblog } from './autoblog';
 import type { CoreDeps } from './deps';
 import { AppError } from './errors';
@@ -29,11 +31,21 @@ describe.skipIf(!url)('core services (integration)', () => {
   const wp = fakeWordPress();
   const { jobs, calls } = recordingJobs();
   const deps: CoreDeps = testDeps({ db, jobs, fetch: wp.fetch });
-  const actor = { orgId: `org_${randomUUID()}`, userId: `user_${randomUUID()}` };
-  const other = { orgId: `org_${randomUUID()}`, userId: `user_${randomUUID()}` };
+  const actor = { orgId: `org_${randomUUID()}`, userId: `user_${randomUUID()}`, role: 'owner' as const };
+  const other = { orgId: `org_${randomUUID()}`, userId: `user_${randomUUID()}`, role: 'owner' as const };
   let siteId = '';
 
-  beforeAll(() => migrateDatabase(url ?? ''));
+  beforeAll(async () => {
+    await migrateDatabase(url ?? '');
+    // Better Auth rows the services rely on for membership checks.
+    for (const a of [actor, other]) {
+      await db.insert(user).values({ id: a.userId, name: 'Test', email: `${a.userId}@example.test` });
+      await db.insert(organization).values({ id: a.orgId, name: 'Test', slug: a.orgId, createdAt: new Date() });
+      await db
+        .insert(member)
+        .values({ id: randomUUID(), organizationId: a.orgId, userId: a.userId, role: 'owner', createdAt: new Date() });
+    }
+  });
   afterAll(() => close());
 
   it('pairs a site with a code, storing only an encrypted token', async () => {
@@ -196,7 +208,7 @@ describe.skipIf(!url)('core services (integration)', () => {
   it('issues MCP keys that resolve to their org and stop working when revoked', async () => {
     const created = await createMcpKey(deps, actor, 'Claude Desktop');
     expect(created.key).toMatch(/^tcw_mcp_/);
-    expect(await verifyMcpKey(deps, created.key)).toEqual({ orgId: actor.orgId, userId: actor.userId });
+    expect(await verifyMcpKey(deps, created.key)).toEqual({ orgId: actor.orgId, userId: actor.userId, role: 'owner' });
     expect(await verifyMcpKey(deps, `${created.key}x`)).toBeNull();
 
     await expect(revokeMcpKey(deps, other, created.id)).rejects.toMatchObject({ code: 'not_found' });
@@ -204,7 +216,38 @@ describe.skipIf(!url)('core services (integration)', () => {
     expect(await verifyMcpKey(deps, created.key)).toBeNull();
   });
 
+  it('stores workspace AI keys encrypted and prefers them', async () => {
+    await expect(
+      setAiKey(deps, { ...actor, role: 'member' }, 'anthropic', 'sk-ant-0123456789abcdef'),
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(setAiKey(deps, actor, 'anthropic', 'short')).rejects.toMatchObject({ code: 'invalid' });
+
+    const saved = await setAiKey(deps, actor, 'anthropic', 'sk-ant-0123456789abcdefWXYZ');
+    expect(saved).toMatchObject({ provider: 'anthropic', last4: 'WXYZ' });
+    expect(await listAiKeys(deps, actor)).toEqual([expect.objectContaining({ provider: 'anthropic', last4: 'WXYZ' })]);
+    expect(await orgKeys(deps, actor.orgId)).toEqual({ anthropic: 'sk-ant-0123456789abcdefWXYZ' });
+    expect(await orgKeys(deps, other.orgId)).toEqual({});
+    expect((await availableModels(deps, actor)).ownKeys).toEqual(['anthropic']);
+
+    await removeAiKey(deps, actor, 'anthropic');
+    expect(await listAiKeys(deps, actor)).toEqual([]);
+  });
+
+  it('stops honoring MCP keys of users who left the workspace', async () => {
+    const created = await createMcpKey(deps, actor, 'Leaver');
+    await db.delete(member).where(eq(member.userId, actor.userId));
+    expect(await verifyMcpKey(deps, created.key)).toBeNull();
+    await db.insert(member).values({
+      id: randomUUID(),
+      organizationId: actor.orgId,
+      userId: actor.userId,
+      role: 'owner',
+      createdAt: new Date(),
+    });
+  });
+
   it('removes a site and its schedule', async () => {
+    await expect(removeSite(deps, { ...actor, role: 'member' }, siteId)).rejects.toMatchObject({ code: 'forbidden' });
     await removeSite(deps, actor, siteId);
     expect(await listSites(deps, actor)).toEqual([]);
     expect(calls.at(-1)).toMatchObject({ kind: 'scheduleAutoblog', job: { siteId, enabled: false } });

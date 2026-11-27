@@ -16,6 +16,9 @@ export type PingResponse = z.infer<typeof pingResponseSchema>;
 
 export const pairRequestSchema = z.object({
   code: z.string().min(1),
+  // The dashboard's public address. The plugin reads its version manifest from there to offer its own
+  // updates in WP admin (Updater.php); it never sends site data to it.
+  platform_url: z.url().optional(),
 });
 export type PairRequest = z.infer<typeof pairRequestSchema>;
 
@@ -38,6 +41,11 @@ export const pairResponseSchema = z.object({
   site: siteInfoSchema,
 });
 export type PairResponse = z.infer<typeof pairResponseSchema>;
+
+// GET /status query. platform_url plays the same role as in pairRequestSchema, so sites paired before
+// the connector could update itself learn where updates come from.
+export const statusQuerySchema = z.object({ platform_url: z.url().optional() });
+export type StatusQuery = z.infer<typeof statusQuerySchema>;
 
 export const statusResponseSchema = z.object({
   connection_id: z.string(),

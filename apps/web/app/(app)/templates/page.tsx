@@ -69,7 +69,7 @@ export default function TemplatesPage() {
 
       {editing && (
         <Card title={editing.id ? 'Edit template' : 'New template'} className="mb-6">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Kind">
               <Select
                 value={editing.kind}
@@ -121,7 +121,7 @@ export default function TemplatesPage() {
           <section key={group.kind}>
             <h2 className="text-sm font-semibold text-slate-800">{group.title}</h2>
             <p className="mb-3 text-sm text-slate-500">{group.description}</p>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {templates.data.templates
                 .filter((t) => t.kind === group.kind)
                 .map((t) => (

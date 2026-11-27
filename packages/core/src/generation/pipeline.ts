@@ -7,6 +7,7 @@ import { orgKeys } from '../ai-keys';
 import type { Actor, CoreDeps } from '../deps';
 import { AppError, errorMessage, invalid, notFound } from '../errors';
 import { isUuid } from '../ids';
+import { assertPlatformBudget, plannedModels, tooManyInProgress } from '../limits';
 import { scoreArticle } from '../seo-score';
 import { getSite, withSite } from '../sites';
 import { getTemplate, type TemplateView } from '../templates';
@@ -35,15 +36,14 @@ export async function createGeneration(
   const input = parseInput(request);
   await getSite(deps, actor, input.siteId);
   await validateChoices(deps, actor, input);
+  await assertBudgetFor(deps, actor.orgId, input);
 
-  const generation = await forOrg(deps.db, actor.orgId).generations.create({
-    siteId: input.siteId,
-    source,
-    status: 'queued',
-    topic: input.topic,
-    input,
-    createdBy: actor.userId ?? null,
-  });
+  const max = deps.limits?.maxActiveGenerations;
+  const generation = await forOrg(deps.db, actor.orgId).generations.createWithinLimit(
+    { siteId: input.siteId, source, status: 'queued', topic: input.topic, input, createdBy: actor.userId ?? null },
+    max,
+  );
+  if (!generation) throw tooManyInProgress(max ?? 0);
   await deps.jobs.generate({ orgId: actor.orgId, generationId: generation.id });
   return generation;
 }
@@ -55,14 +55,16 @@ export async function regenerate(deps: CoreDeps, actor: Actor, generationId: str
   if (generation.status === 'generating' || generation.status === 'publishing' || generation.status === 'queued') {
     throw new AppError('conflict', 'This article is still being processed.');
   }
-  const updated = await scope.generations.update(generationId, {
-    status: 'queued',
-    error: null,
-    output: null,
-    seoScore: null,
-  });
+  await assertBudgetFor(deps, actor.orgId, parseInput(generation.input));
+  const max = deps.limits?.maxActiveGenerations;
+  const updated = await scope.generations.requeueWithinLimit(
+    generationId,
+    { status: 'queued', error: null, output: null, seoScore: null },
+    max,
+  );
+  if (!updated) throw tooManyInProgress(max ?? 0);
   await deps.jobs.generate({ orgId: actor.orgId, generationId });
-  return updated ?? generation;
+  return updated;
 }
 
 export async function getGeneration(deps: CoreDeps, actor: Actor, generationId: string): Promise<Generation> {
@@ -223,6 +225,8 @@ async function generateArticle(
     throw new AppError('ai_unavailable', 'No text model is available. Add an Anthropic or OpenAI API key.');
   const imageModel = input.imageModel ?? deps.ai.defaultModel('image', keys)?.id ?? null;
   const wantsImages = input.featuredImage || input.inlineImages > 0;
+  // Re-checked here because queued and scheduled (auto-blogging) articles start later.
+  await assertPlatformBudget(deps, scope.orgId, keys, plannedModels(deps, keys, input));
   if (wantsImages && !imageModel)
     warnings.push('Images were skipped: no image model is available (add an OpenAI API key).');
 
@@ -246,7 +250,8 @@ async function generateArticle(
   });
   const result = await deps.ai.generateText(
     textModel,
-    { system, prompt, maxOutputTokens: Math.max(16000, input.words * 6) },
+    // Room for adaptive thinking plus long, markup-heavy HTML; streaming keeps this clear of timeouts.
+    { system, prompt, maxOutputTokens: 64000 },
     meter,
     keys,
   );
@@ -441,6 +446,12 @@ async function validateChoices(deps: CoreDeps, actor: Actor, input: GenerationIn
     if (id) await getTemplate(deps, actor, id);
   }
   if (input.delivery.mode === 'publish') validateSchedule(input.delivery);
+}
+
+// Fails fast, before queueing, when the owners' platform budget is used up.
+async function assertBudgetFor(deps: CoreDeps, orgId: string, input: GenerationInput): Promise<void> {
+  const keys = await orgKeys(deps, orgId);
+  await assertPlatformBudget(deps, orgId, keys, plannedModels(deps, keys, input));
 }
 
 function validateSchedule(options: { status: string; scheduledAt?: string }): void {

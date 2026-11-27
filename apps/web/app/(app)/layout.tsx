@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { cx, Loading, Select } from '../../components/ui';
 import { api, type Me, type ModelsResponse } from '../../lib/api';
 import { authClient } from '../../lib/auth-client';
@@ -20,6 +20,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const session = authClient.useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Navigating closes the mobile menu.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the trigger, not a value used inside.
+  useEffect(() => setMenuOpen(false), [pathname]);
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me'), enabled: !!session.data });
   const models = useQuery({
     queryKey: ['models'],
@@ -51,15 +55,54 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     router.replace('/sign-in');
   }
 
+  const logo = (
+    <Link href="/sites" className="flex items-center gap-2 px-2">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 font-bold text-white">T</span>
+      <span className="font-semibold">TriCity Writer</span>
+    </Link>
+  );
+
   return (
-    <div className="flex min-h-screen">
-      <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-slate-200 bg-white px-4 py-5">
-        <Link href="/sites" className="mb-6 flex items-center gap-2 px-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 font-bold text-white">
-            T
-          </span>
-          <span className="font-semibold">TriCity Writer</span>
-        </Link>
+    <div className="min-h-screen md:flex">
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-2 py-2.5 md:hidden">
+        {logo}
+        <button
+          type="button"
+          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+          aria-controls="app-menu"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <svg
+            viewBox="0 0 20 20"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+          >
+            {menuOpen ? <path d="M5 5l10 10M15 5L5 15" /> : <path d="M3 5h14M3 10h14M3 15h14" />}
+          </svg>
+        </button>
+      </div>
+      {menuOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          className="fixed inset-0 z-30 bg-slate-900/30 md:hidden"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
+      <aside
+        id="app-menu"
+        className={cx(
+          'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white px-4 py-5 transition-transform',
+          'md:sticky md:top-0 md:bottom-auto md:h-screen md:w-60 md:shrink-0 md:translate-x-0',
+          menuOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        <div className="mb-6">{logo}</div>
         {me.data.organizations.length > 1 && (
           <Select
             className="mb-4"
@@ -103,7 +146,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className="min-w-0 flex-1 px-8 py-8">
+      <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
     </div>

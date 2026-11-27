@@ -87,6 +87,12 @@ describe('HTML handling', () => {
     );
   });
 
+  it('drops CSS escapes that could hide url()', () => {
+    expect(sanitizeArticleHtml('<div style="background:\\75 rl(https://evil.example/x.png);color:red">x</div>')).toBe(
+      '<div style="color:red">x</div>',
+    );
+  });
+
   it('drops url() in styles', () => {
     expect(sanitizeArticleHtml('<div style="background:url(https://evil.example/x.png);padding:4px">x</div>')).toBe(
       '<div style="padding:4px">x</div>',

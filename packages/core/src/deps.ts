@@ -18,7 +18,20 @@ export interface CoreDeps {
   jobs: JobQueue;
   // Sent to WordPress sites so hosts can identify (and allow-list) our traffic.
   userAgent: string;
+  // Used for every call to a WordPress site; production passes one that refuses private addresses.
   fetch?: typeof fetch;
+  // The dashboard's public address, given to the connector plugin at pairing for its update checks.
+  platformUrl?: string;
+  limits?: Limits;
+}
+
+export interface Limits {
+  // What each workspace may spend per calendar month (UTC) through platform-held AI keys, in USD.
+  // Unset = no cap. A workspace's own keys (BYOK) are never capped.
+  platformMonthlyBudgetUsd?: number;
+  // Articles a workspace may have queued or generating at once, so one workspace can't starve the
+  // shared worker. Unset = no cap.
+  maxActiveGenerations?: number;
 }
 
 // Who is acting. Every service call is scoped to one organization (tenant).

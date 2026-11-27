@@ -84,7 +84,7 @@ export function OptionsFields({
 }) {
   const set = <K extends keyof GenerationOptions>(key: K, v: GenerationOptions[K]) => onChange({ ...value, [key]: v });
   return (
-    <div className="grid gap-5 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
       {sections.includes('content') && (
         <>
           <Field label="Content template" hint="What to write: structure, angle and tone.">

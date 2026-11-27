@@ -25,9 +25,14 @@ export function actor(request: FastifyRequest): Actor {
 export function toFetchRequest(request: FastifyRequest, url?: string): Request {
   const target = url ?? new URL(request.url, `http://${request.headers.host ?? 'localhost'}`).toString();
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD' && request.body !== undefined;
+  const headers = fromNodeHeaders(request.headers);
+  // Better Auth rate-limits sign-in and sign-up per client IP, read from X-Forwarded-For, and gives up
+  // (one bucket shared by everyone) unless that header holds exactly one address. Pass on the address
+  // Fastify resolved under trustProxy: behind Caddy, the visitor's.
+  headers.set('x-forwarded-for', request.ip);
   return new Request(target, {
     method: request.method,
-    headers: fromNodeHeaders(request.headers),
+    headers,
     body: hasBody ? (typeof request.body === 'string' ? request.body : JSON.stringify(request.body)) : undefined,
   });
 }

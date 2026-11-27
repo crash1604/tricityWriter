@@ -11,15 +11,19 @@ export interface ModelSpec {
   providerModel: string;
   label: string;
   description: string;
-  // Prices in USD. Models without a price record usage with cost 0.
+  // Prices in USD. Models without a price record usage with cost 0. Cached input is billed at 0.1x
+  // the input price and cache writes at 1.25x (Anthropic; OpenAI has no cache-write charge).
   pricing?: { inputPerMTok: number; outputPerMTok: number } | { perImage: number };
   // Reasoning effort for text models that support it.
   effort?: Effort;
+  // Anthropic: send `fallbacks: 'default'` so a request declined by a safety classifier is re-run on
+  // the recommended fallback model. Only for models that have a server-side fallback.
+  fallbacks?: boolean;
   // Preferred default for its kind when its provider has a key.
   default?: boolean;
 }
 
-// Who supplied the API key. v1 only has platform keys; per-org keys (BYOK) come later.
+// Who supplied the API key: the platform (server-wide keys) or the workspace itself (BYOK).
 export interface Credential {
   owner: 'platform' | 'org';
   apiKey: string;

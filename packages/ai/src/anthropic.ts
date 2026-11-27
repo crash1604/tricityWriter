@@ -11,18 +11,21 @@ import {
 export class AnthropicProvider implements TextProvider {
   private readonly clients = new Map<string, Anthropic>();
 
+  // `fetch` is a test seam for checking what goes over the wire.
+  constructor(private readonly options: { fetch?: typeof fetch } = {}) {}
+
   async generateText(model: ModelSpec, credential: Credential, request: TextRequest): Promise<TextResult> {
     const client = this.client(credential.apiKey);
     try {
-      // Streaming keeps long articles clear of HTTP timeouts. `fallbacks: 'default'` lets the API
-      // re-run a request declined by a safety classifier on Anthropic's recommended fallback model;
-      // on models without fallback support the request simply runs on the requested model.
+      // Streaming keeps long articles clear of HTTP timeouts. Thinking is always on for current models
+      // and counts against max_tokens, so leave room well beyond the article itself. `fallbacks:
+      // 'default'` re-runs a request declined by a safety classifier on Anthropic's recommended
+      // fallback model; Haiku 5.5 has no server-side fallback, so it is only sent where supported.
       const message = await client.beta.messages
         .stream({
           model: model.providerModel,
           max_tokens: request.maxOutputTokens ?? 64000,
-          betas: ['server-side-fallback-2026-07-01'],
-          fallbacks: 'default',
+          ...(model.fallbacks && { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }),
           output_config: { effort: model.effort ?? 'high' },
           cache_control: { type: 'ephemeral' },
           system: request.system,
@@ -59,7 +62,7 @@ export class AnthropicProvider implements TextProvider {
 
   async verifyKey(apiKey: string): Promise<void> {
     try {
-      await new Anthropic({ apiKey, maxRetries: 0 }).models.list({ limit: 1 });
+      await new Anthropic({ apiKey, maxRetries: 0, fetch: this.options.fetch }).models.list({ limit: 1 });
     } catch (error) {
       throw toAiError(error);
     }
@@ -68,7 +71,7 @@ export class AnthropicProvider implements TextProvider {
   private client(apiKey: string): Anthropic {
     let client = this.clients.get(apiKey);
     if (!client) {
-      client = new Anthropic({ apiKey });
+      client = new Anthropic({ apiKey, fetch: this.options.fetch });
       this.clients.set(apiKey, client);
     }
     return client;

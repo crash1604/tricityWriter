@@ -5,3 +5,10 @@ packages:
 allowBuilds:
   esbuild: true
   msgpackr-extract: false
+
+# Security fixes for transitive dependencies (pnpm audit, 2026-11-18). Exact versions, each released at
+# least two weeks before pinning. Remove an entry once the depending package ships the fix itself.
+overrides:
+  next: 16.4.5
+  hono: 4.13.16
+  "@hono/node-server": 2.1.6

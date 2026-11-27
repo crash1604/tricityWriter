@@ -1,9 +1,10 @@
 import { type CoreDeps, createAiService, publishGeneration, runAutoblog, runGeneration } from '@tricity/core';
 import { createDb, system } from '@tricity/db';
 import { createJobQueue, createRedis } from '@tricity/jobs';
-import { autoblogRunJobSchema, generateJobSchema, JOBS, publishJobSchema, QUEUES } from '@tricity/shared';
+import { autoblogRunJobSchema, generateJobSchema, JOBS, publishJobSchema, QUEUES, userAgent } from '@tricity/shared';
+import { createSiteFetch } from '@tricity/wp-client';
 import { type Job, Worker } from 'bullmq';
-import { loadConfig, USER_AGENT } from './config';
+import { loadConfig } from './config';
 
 const config = loadConfig();
 const { db, close: closeDb } = createDb(config.DATABASE_URL);
@@ -19,7 +20,10 @@ const deps: CoreDeps = {
   }),
   jobs,
   encryptionKey: config.encryptionKey,
-  userAgent: USER_AGENT,
+  userAgent: userAgent(config.WEB_ORIGIN),
+  fetch: createSiteFetch({ allowPrivateNetworks: config.ALLOW_PRIVATE_SITE_URLS }),
+  // The worker enforces the budget for queued and scheduled articles; the in-progress cap is the API's.
+  limits: { platformMonthlyBudgetUsd: config.PLATFORM_MONTHLY_BUDGET_USD },
 };
 
 async function processGeneration(job: Job): Promise<void> {
@@ -63,7 +67,31 @@ console.log(
   `[worker] ${profiles.length} auto-blogging schedule(s) registered${config.AI_FAKE ? ' (AI_FAKE=true)' : ''}`,
 );
 
+// Articles whose job died with a worker (crash, out-of-memory, a redeploy past BullMQ's stall limit)
+// would stay "generating" or "publishing" forever. The grace periods are far longer than any real
+// article takes, so BullMQ's own stalled-job retry always gets the first chance.
+const PROCESSING_GRACE_MS = 45 * 60_000;
+const QUEUED_GRACE_MS = 6 * 60 * 60_000;
+async function recoverStaleGenerations(): Promise<void> {
+  const now = Date.now();
+  const result = await system.recoverStaleGenerations(db, {
+    processing: new Date(now - PROCESSING_GRACE_MS),
+    queued: new Date(now - QUEUED_GRACE_MS),
+  });
+  if (result.failed || result.publishingReset) {
+    console.warn(
+      `[worker] recovered ${result.failed} interrupted article(s) and ${result.publishingReset} interrupted publish(es)`,
+    );
+  }
+}
+await recoverStaleGenerations();
+const recovery = setInterval(
+  () => recoverStaleGenerations().catch((error) => console.error('[worker] recovery failed:', error)),
+  10 * 60_000,
+);
+
 async function shutdown(): Promise<void> {
+  clearInterval(recovery);
   await Promise.all(workers.map((w) => w.close()));
   await jobs.close();
   await connection.quit();

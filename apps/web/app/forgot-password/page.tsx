@@ -1,12 +1,16 @@
 'use client';
 
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { type FormEvent, useState } from 'react';
 import { AuthShell } from '../../components/auth-form';
 import { Button, ErrorText, Field, Input } from '../../components/ui';
+import { publicConfig } from '../../lib/api';
 import { authClient } from '../../lib/auth-client';
 
 export default function ForgotPasswordPage() {
+  const config = useQuery({ queryKey: ['public-config'], queryFn: publicConfig, staleTime: 60_000 });
+  const byEmail = config.data?.passwordResetByEmail ?? true;
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +39,9 @@ export default function ForgotPasswordPage() {
     >
       {sent ? (
         <p className="text-sm text-slate-600">
-          If an account exists for that address, a reset link is on its way. If this server has no email provider
-          configured, ask your administrator for the link: it is written to the server log.
+          {byEmail
+            ? 'If an account exists for that address, a reset link is on its way. It works for one hour.'
+            : "This server doesn't send email yet, so the reset link was written to its log. Ask your administrator for it."}
         </p>
       ) : (
         <form onSubmit={submit} className="space-y-4">

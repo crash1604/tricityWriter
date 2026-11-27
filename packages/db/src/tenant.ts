@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, isNull, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from 'drizzle-orm';
 import type { Db } from './client';
 import {
   aiCredentials,
@@ -7,6 +7,7 @@ import {
   generationImages,
   generations,
   mcpKeys,
+  member,
   type NewUsageEvent,
   sites,
   templates,
@@ -15,6 +16,20 @@ import {
 
 type Insert<T extends { $inferInsert: unknown }> = Omit<T['$inferInsert'], 'id' | 'orgId' | 'createdAt' | 'updatedAt'>;
 type Patch<T extends { $inferInsert: unknown }> = Partial<Insert<T>>;
+
+const ACTIVE: ('queued' | 'generating')[] = ['queued', 'generating'];
+
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+// Takes the workspace's queue lock for the rest of the transaction, then counts its active articles.
+async function activeUnderLock(tx: Tx, orgId: string): Promise<number> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`tcw:active:${orgId}`}, 0))`);
+  const [row] = await tx
+    .select({ n: count() })
+    .from(generations)
+    .where(and(eq(generations.orgId, orgId), inArray(generations.status, ACTIVE)));
+  return row?.n ?? 0;
+}
 
 function one<T>(rows: T[]): T {
   const [row] = rows;
@@ -26,6 +41,22 @@ function one<T>(rows: T[]): T {
 export function forOrg(db: Db, orgId: string) {
   return {
     orgId,
+
+    // Every row this workspace owns, in one transaction. For deleting a workspace; the organization
+    // row itself belongs to Better Auth.
+    async deleteAll() {
+      await db.transaction(async (tx) => {
+        await tx.delete(usageEvents).where(eq(usageEvents.orgId, orgId));
+        await tx.delete(mcpKeys).where(eq(mcpKeys.orgId, orgId));
+        await tx.delete(aiCredentials).where(eq(aiCredentials.orgId, orgId));
+        await tx.delete(autoblogTopics).where(eq(autoblogTopics.orgId, orgId));
+        await tx.delete(autoblogProfiles).where(eq(autoblogProfiles.orgId, orgId));
+        await tx.delete(generationImages).where(eq(generationImages.orgId, orgId));
+        await tx.delete(generations).where(eq(generations.orgId, orgId));
+        await tx.delete(templates).where(eq(templates.orgId, orgId));
+        await tx.delete(sites).where(eq(sites.orgId, orgId));
+      });
+    },
 
     sites: {
       list() {
@@ -147,6 +178,40 @@ export function forOrg(db: Db, orgId: string) {
           .where(and(eq(generations.orgId, orgId), eq(generations.id, id)))
           .returning();
         return row;
+      },
+      // Articles waiting for or using the worker.
+      async countActive() {
+        const [row] = await db
+          .select({ n: count() })
+          .from(generations)
+          .where(and(eq(generations.orgId, orgId), inArray(generations.status, ACTIVE)));
+        return row?.n ?? 0;
+      },
+      // Inserts unless the workspace already has `max` articles queued or generating (null then). A
+      // per-workspace advisory lock serialises concurrent requests, so parallel calls can't all pass
+      // the count before any of them inserts.
+      async createWithinLimit(input: Insert<typeof generations>, max: number | undefined) {
+        return db.transaction(async (tx) => {
+          if (max !== undefined && (await activeUnderLock(tx, orgId)) >= max) return null;
+          return one(
+            await tx
+              .insert(generations)
+              .values({ ...input, orgId })
+              .returning(),
+          );
+        });
+      },
+      // Puts a finished article back in the queue (regenerate), under the same limit.
+      async requeueWithinLimit(id: string, patch: Patch<typeof generations>, max: number | undefined) {
+        return db.transaction(async (tx) => {
+          if (max !== undefined && (await activeUnderLock(tx, orgId)) >= max) return null;
+          const [row] = await tx
+            .update(generations)
+            .set(patch)
+            .where(and(eq(generations.orgId, orgId), eq(generations.id, id)))
+            .returning();
+          return row ?? null;
+        });
       },
     },
 
@@ -402,6 +467,69 @@ export const system = {
   },
   async touchMcpKey(db: Db, id: string) {
     await db.update(mcpKeys).set({ lastUsedAt: new Date() }).where(eq(mcpKeys.id, id));
+  },
+  // The platform-key budget belongs to the accounts that own a workspace, not to the workspace, or a new
+  // workspace would be a fresh budget. Sums what platform keys cost since `since`, in micro-USD, across
+  // every workspace owned by any owner of `orgId` (and `orgId` itself).
+  async platformCostOfOwners(db: Db, orgId: string, since: Date) {
+    const owners = db
+      .select({ userId: member.userId })
+      .from(member)
+      .where(and(eq(member.organizationId, orgId), eq(member.role, 'owner')));
+    const ownedOrgs = db
+      .select({ orgId: member.organizationId })
+      .from(member)
+      .where(and(eq(member.role, 'owner'), inArray(member.userId, owners)));
+    const [row] = await db
+      .select({ cost: sql<number>`coalesce(${sum(usageEvents.costMicroUsd)}, 0)::bigint` })
+      .from(usageEvents)
+      .where(
+        and(
+          or(eq(usageEvents.orgId, orgId), inArray(usageEvents.orgId, ownedOrgs)),
+          eq(usageEvents.credentialOwner, 'platform'),
+          gte(usageEvents.createdAt, since),
+        ),
+      );
+    return Number(row?.cost ?? 0);
+  },
+  // A deleted account's keys must stop working in every workspace it belonged to.
+  async revokeMcpKeysOfUser(db: Db, userId: string) {
+    await db
+      .update(mcpKeys)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(mcpKeys.userId, userId), isNull(mcpKeys.revokedAt)));
+  },
+  // The worker recovers articles whose job died with it (crash, out-of-memory, a redeploy past BullMQ's
+  // stall limit), which would otherwise stay "generating" or "publishing" forever. Every org at once,
+  // because the worker has no tenant to scope to.
+  async recoverStaleGenerations(db: Db, cutoffs: { processing: Date; queued: Date }) {
+    const failed = await db
+      .update(generations)
+      .set({ status: 'failed', error: 'The article was interrupted. Generate it again.', finishedAt: new Date() })
+      .where(
+        or(
+          and(eq(generations.status, 'generating'), lt(generations.updatedAt, cutoffs.processing)),
+          and(eq(generations.status, 'queued'), lt(generations.updatedAt, cutoffs.queued)),
+        ),
+      )
+      .returning({ id: generations.id });
+    if (failed.length) {
+      await db
+        .update(autoblogTopics)
+        .set({ status: 'failed' })
+        .where(
+          inArray(
+            autoblogTopics.generationId,
+            failed.map((g) => g.id),
+          ),
+        );
+    }
+    const interrupted = await db
+      .update(generations)
+      .set({ status: 'ready', error: 'Publishing was interrupted. Publish again.' })
+      .where(and(eq(generations.status, 'publishing'), lt(generations.updatedAt, cutoffs.processing)))
+      .returning({ id: generations.id });
+    return { failed: failed.length, publishingReset: interrupted.length };
   },
   // The worker re-registers every enabled schedule on startup.
   listEnabledAutoblogProfiles(db: Db) {

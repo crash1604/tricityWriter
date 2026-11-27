@@ -46,7 +46,7 @@ export class ModelRegistry {
 
 export interface AiServiceOptions {
   models?: readonly ModelSpec[];
-  // Platform-held keys (v1). Per-org keys will be resolved per call later.
+  // Platform-held keys. A workspace's own keys (OrgKeys) take precedence per call.
   platformKeys: Partial<Record<ProviderId, string>>;
   // false = workspaces must bring their own keys; platform keys are never used.
   allowPlatformKeys?: boolean;
@@ -108,6 +108,14 @@ export class AiService {
   defaultModel(kind: ModelKind, org: OrgKeys = {}): ModelSpec | undefined {
     const usable = this.registry.list(kind).filter((m) => this.isFake || this.credential(m.provider, org));
     return usable.find((m) => m.default) ?? usable[0];
+  }
+
+  // Whose key a call to this model would use: the workspace's own, the platform's, or none. Fake
+  // mode reports undefined because nobody pays.
+  credentialOwner(modelId: string, org: OrgKeys = {}): Credential['owner'] | undefined {
+    if (this.fake) return undefined;
+    const model = this.registry.list().find((m) => m.id === modelId);
+    return model ? this.credential(model.provider, org)?.owner : undefined;
   }
 
   // Checks a key against the provider without spending tokens (lists models).

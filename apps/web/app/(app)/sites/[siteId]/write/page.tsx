@@ -87,7 +87,7 @@ export default function WritePage() {
 
       <Card>
         {step === 0 && (
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div className="md:col-span-2">
               <Field label="Topic or working title">
                 <Input
@@ -127,7 +127,7 @@ export default function WritePage() {
         )}
 
         {step === 1 && (
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <Field
               label="Design template"
               hint="How the HTML should look. Works with any theme: fonts and widths stay the theme's."

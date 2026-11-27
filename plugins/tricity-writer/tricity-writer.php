@@ -2,10 +2,11 @@
 /**
  * Plugin Name:       TriCity Writer Connector
  * Description:       Connects this site to TriCity Writer so it can draft, publish and optimize content for you.
- * Version:           0.1.0
+ * Version:           1.0.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            TriCity Writer
+ * Update URI:        https://tricity-writer.invalid/connector
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       tricity-writer
@@ -15,7 +16,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'TCW_VERSION', '0.1.0' );
+define( 'TCW_VERSION', '1.0.0' );
+define( 'TCW_PLUGIN_FILE', __FILE__ );
 
 // PSR-4 style autoloading for TricityWriter\ classes in src/, without a Composer runtime dependency.
 spl_autoload_register(

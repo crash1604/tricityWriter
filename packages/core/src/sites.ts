@@ -40,6 +40,9 @@ export async function pairSite(
   try {
     await client.ping();
   } catch (error) {
+    if (error instanceof ConnectorError && error.code === 'tcw_blocked_address') {
+      throw new AppError('invalid', `${error.message}.`);
+    }
     if (error instanceof ConnectorError && error.code === 'rest_no_route') {
       throw new AppError('site_error', 'The TriCity Writer Connector plugin is not active on this site.');
     }
@@ -54,7 +57,7 @@ export async function pairSite(
 
   let paired: Awaited<ReturnType<ConnectorClient['pair']>>;
   try {
-    paired = await client.pair(input.code.trim());
+    paired = await client.pair(input.code.trim(), deps.platformUrl);
   } catch (error) {
     if (error instanceof ConnectorError && error.code === 'tcw_invalid_code') {
       throw new AppError('invalid', 'That pairing code is invalid or has expired. Generate a new one in WordPress.');
@@ -129,7 +132,7 @@ export async function refreshSite(deps: CoreDeps, actor: Actor, siteId: string):
   const site = await getSite(deps, actor, siteId);
   try {
     const client = siteClient(deps, site);
-    const status = await client.status();
+    const status = await client.status(deps.platformUrl);
     const updated = await scope.sites.update(site.id, {
       status: 'connected',
       statusMessage: null,

@@ -1,5 +1,5 @@
 import { parseEncryptionKey } from '@tricity/core';
-import { loadRootEnv } from '@tricity/shared/env';
+import { blankAsUnset, loadRootEnv } from '@tricity/shared/env';
 import { z } from 'zod';
 
 const envSchema = z.object({
@@ -10,6 +10,10 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   ALLOW_PLATFORM_KEYS: z.stringbool().default(true),
   AI_FAKE: z.stringbool().default(false),
+  ALLOW_PRIVATE_SITE_URLS: z.stringbool().default(false),
+  PLATFORM_MONTHLY_BUDGET_USD: z.preprocess(blankAsUnset, z.coerce.number().min(0).optional()),
+  // Public dashboard address; sent to WordPress sites in the User-Agent as a contact point.
+  WEB_ORIGIN: z.url().default('http://localhost:3000'),
   GENERATION_CONCURRENCY: z.coerce.number().int().min(1).default(4),
 });
 
@@ -20,5 +24,3 @@ export function loadConfig(): Config {
   const env = envSchema.parse(process.env);
   return { ...env, encryptionKey: parseEncryptionKey(env.ENCRYPTION_KEY) };
 }
-
-export const USER_AGENT = 'TriCityWriter/0.2 (+https://github.com/tricity-writer)';

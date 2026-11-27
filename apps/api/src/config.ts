@@ -1,5 +1,5 @@
 import { parseEncryptionKey } from '@tricity/core';
-import { loadRootEnv } from '@tricity/shared/env';
+import { blankAsUnset, loadRootEnv } from '@tricity/shared/env';
 import { z } from 'zod';
 
 const envSchema = z
@@ -17,10 +17,21 @@ const envSchema = z
     // false = every workspace must add its own AI keys (Settings → AI keys).
     ALLOW_PLATFORM_KEYS: z.stringbool().default(true),
     AI_FAKE: z.stringbool().default(false),
+    // Local development only (WordPress Playground on 127.0.0.1). In production, sites must resolve to
+    // public addresses so nobody can point the server at internal services.
+    ALLOW_PRIVATE_SITE_URLS: z.stringbool().default(false),
+    // USD each workspace may spend per month through the platform keys above. Unset = no cap.
+    PLATFORM_MONTHLY_BUDGET_USD: z.preprocess(blankAsUnset, z.coerce.number().min(0).optional()),
+    // Articles a workspace may have queued or generating at once.
+    MAX_ACTIVE_GENERATIONS: z.preprocess(blankAsUnset, z.coerce.number().int().min(1).default(20)),
     // none = emails (password reset links, invitations) are written to the server log.
     EMAIL_PROVIDER: z.enum(['none', 'resend']).default('none'),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().default('TriCity Writer <no-reply@example.com>'),
+    // open = anyone can sign up; invite = only the first account and invited people.
+    SIGNUP_MODE: z.enum(['open', 'invite']).default('open'),
+    // Ask new accounts to confirm their email. Takes effect only when emails are actually sent.
+    REQUIRE_EMAIL_VERIFICATION: z.stringbool().default(true),
   })
   .refine((env) => env.EMAIL_PROVIDER !== 'resend' || env.RESEND_API_KEY, {
     message: 'RESEND_API_KEY is required when EMAIL_PROVIDER=resend',
@@ -37,5 +48,3 @@ export function loadConfig(): Config {
     encryptionKey: parseEncryptionKey(env.ENCRYPTION_KEY),
   };
 }
-
-export const USER_AGENT = 'TriCityWriter/0.2 (+https://github.com/tricity-writer)';

@@ -16,11 +16,11 @@ export default function SettingsPage() {
         <WorkspaceSettings />
         <AiKeysSettings />
         <McpSettings />
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ConnectedApps />
           <AccountSettings />
         </div>
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Models />
           <Usage />
         </div>
@@ -69,7 +69,7 @@ function McpSettings() {
         Connect Claude, ChatGPT, Cursor or any MCP client to manage your sites by conversation. Each key acts for this
         workspace.
       </p>
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           <form onSubmit={submit} className="flex items-end gap-2">
             <div className="flex-1">
@@ -154,6 +154,41 @@ function Models() {
   );
 }
 
+// The included monthly AI usage on the platform's keys, shared by every workspace with the same owner.
+// The workspace's own keys don't count.
+function Allowance({ used, budget }: { used: number; budget: number }) {
+  const share = budget > 0 ? Math.min(1, used / budget) : 1;
+  const spent = share >= 1;
+  return (
+    <div className="mb-4 rounded-lg bg-slate-50 p-3 text-sm">
+      <div className="mb-1.5 flex justify-between">
+        <span className="font-medium text-slate-700">Included AI usage</span>
+        <span className="text-slate-500">
+          ${Math.min(used, budget).toFixed(2)} of ${budget.toFixed(2)}
+        </span>
+      </div>
+      <div
+        className="h-2 overflow-hidden rounded-full bg-slate-200"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(share * 100)}
+        aria-label="Included AI usage this month"
+      >
+        <div
+          className={spent ? 'h-full bg-red-500' : share > 0.8 ? 'h-full bg-amber-500' : 'h-full bg-brand-600'}
+          style={{ width: `${share * 100}%` }}
+        />
+      </div>
+      <p className="mt-1.5 text-xs text-slate-500">
+        {spent
+          ? 'Used up for this month. Add your own keys under AI keys to keep writing.'
+          : 'Shared by every workspace with the same owner, and resets on the 1st (UTC). Articles written with your own AI keys never count.'}
+      </p>
+    </div>
+  );
+}
+
 function Usage() {
   const usage = useQuery({ queryKey: ['usage'], queryFn: () => api<UsageSummary>('/usage') });
   if (usage.isPending)
@@ -171,36 +206,39 @@ function Usage() {
         <Stat label="Images" value={u.totals.images} />
         <Stat label="Est. AI cost" value={`$${u.totals.costUsd.toFixed(2)}`} />
       </dl>
+      {u.platform.budgetUsd !== null && <Allowance used={u.platform.usedUsd} budget={u.platform.budgetUsd} />}
       {u.byModel.length === 0 ? (
         <EmptyState title="No AI calls yet" />
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs text-slate-500">
-            <tr>
-              <th className="pb-2 font-medium">Model</th>
-              <th className="pb-2 font-medium">Calls</th>
-              <th className="pb-2 font-medium">Tokens in / out</th>
-              <th className="pb-2 font-medium">Cost</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {u.byModel.map((r) => (
-              <tr key={`${r.provider}-${r.model}`}>
-                <td className="py-1.5">
-                  {r.model}
-                  {r.provider === 'fake' && <span className="text-xs text-slate-400"> (fake)</span>}
-                </td>
-                <td className="py-1.5">{r.calls}</td>
-                <td className="py-1.5">
-                  {r.kind === 'image'
-                    ? `${r.images} images`
-                    : `${r.inputTokens.toLocaleString()} / ${r.outputTokens.toLocaleString()}`}
-                </td>
-                <td className="py-1.5">${(r.costMicroUsd / 1_000_000).toFixed(4)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-slate-500">
+              <tr>
+                <th className="pb-2 font-medium">Model</th>
+                <th className="pb-2 font-medium">Calls</th>
+                <th className="pb-2 font-medium">Tokens in / out</th>
+                <th className="pb-2 font-medium">Cost</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {u.byModel.map((r) => (
+                <tr key={`${r.provider}-${r.model}`}>
+                  <td className="py-1.5">
+                    {r.model}
+                    {r.provider === 'fake' && <span className="text-xs text-slate-400"> (fake)</span>}
+                  </td>
+                  <td className="py-1.5">{r.calls}</td>
+                  <td className="py-1.5">
+                    {r.kind === 'image'
+                      ? `${r.images} images`
+                      : `${r.inputTokens.toLocaleString()} / ${r.outputTokens.toLocaleString()}`}
+                  </td>
+                  <td className="py-1.5">${(r.costMicroUsd / 1_000_000).toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );

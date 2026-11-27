@@ -11,6 +11,7 @@ use TricityWriter\Auth;
 use TricityWriter\Connections;
 use TricityWriter\Pairing;
 use TricityWriter\Plugin;
+use TricityWriter\Updater;
 use WP_Error;
 use WP_HTTP_Response;
 use WP_REST_Request;
@@ -96,6 +97,7 @@ final class Routes {
 		}
 
 		list( $id, $token ) = Connections::create( $entry['name'], (int) $entry['user_id'] );
+		Updater::remember_source( (string) $request->get_param( 'platform_url' ), (int) $entry['user_id'] );
 
 		return array(
 			'connection_id'   => $id,
@@ -108,11 +110,14 @@ final class Routes {
 	/**
 	 * GET /status: token-authenticated health check.
 	 *
+	 * @param WP_REST_Request $request Current request (optional platform_url).
 	 * @return array<string, mixed>
 	 */
-	public static function status(): array {
+	public static function status( WP_REST_Request $request ): array {
 		$connection = (array) Auth::connection();
 		$user       = wp_get_current_user();
+		// Sites paired before the connector could update itself learn where updates come from here.
+		Updater::remember_source( (string) $request->get_param( 'platform_url' ), $user->ID );
 
 		return array(
 			'connection_id'   => (string) $connection['id'],

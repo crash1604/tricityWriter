@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { ConnectorClient, ConnectorError } from '@tricity/wp-client';
+import { ConnectorClient, ConnectorError, createSiteFetch } from '@tricity/wp-client';
 import sharp from 'sharp';
 
 const SEO_SLUGS = { yoast: 'wordpress-seo', rankmath: 'seo-by-rank-math', aioseo: 'all-in-one-seo-pack' } as const;
@@ -60,6 +60,31 @@ function startPlayground(): ChildProcess {
           "$GLOBALS['wp_rewrite']->set_permalink_structure('/%postname%/');",
           '$GLOBALS["wp_rewrite"]->flush_rules();',
           "file_put_contents('/e2e/code.txt', TricityWriter\\Pairing::issue('E2E', 1));",
+        ].join('\n'),
+      },
+      // Plugin updates: the dashboard's manifest is stubbed, then WordPress' own update filter is asked.
+      {
+        step: 'runPHP',
+        code: [
+          '<?php',
+          "require_once '/wordpress/wp-load.php';",
+          "require_once ABSPATH . 'wp-admin/includes/plugin.php';",
+          "$author = wp_insert_user(array('user_login' => 'author1', 'user_pass' => wp_generate_password(), 'role' => 'author'));",
+          "TricityWriter\\Updater::remember_source('https://evil.example', $author);",
+          "TricityWriter\\Updater::remember_source('http://example.com', 1);",
+          "$rejected = get_option('tcw_update_source', '');",
+          "TricityWriter\\Updater::remember_source('https://example.com/', 1);",
+          "add_filter('pre_http_request', function ($pre, $args, $url) {",
+          "  if ($url !== 'https://example.com/downloads/tricity-writer.json') return $pre;",
+          "  $body = json_encode(array('version' => '9.9.9', 'requires' => '6.0', 'requires_php' => '7.4', 'tested' => '6.8', 'changelog' => '<ul><li>New</li></ul>'));",
+          "  return array('headers' => array(), 'body' => $body, 'response' => array('code' => 200, 'message' => 'OK'), 'cookies' => array(), 'filename' => null);",
+          '}, 10, 3);',
+          "$file = 'tricity-writer/tricity-writer.php';",
+          '$data = get_plugin_data(WP_PLUGIN_DIR . "/" . $file, false, false);',
+          "$host = wp_parse_url(esc_url_raw($data['UpdateURI']), PHP_URL_HOST);",
+          "$update = apply_filters('update_plugins_' . $host, false, $data, $file, array());",
+          "$info = apply_filters('plugins_api', false, 'plugin_information', (object) array('slug' => 'tricity-writer'));",
+          "file_put_contents('/e2e/updater.json', json_encode(array('rejected' => $rejected, 'host' => $host, 'update' => $update, 'info_version' => is_object($info) ? $info->version : null)));",
         ].join('\n'),
       },
     ],
@@ -117,15 +142,36 @@ async function main(): Promise<void> {
     );
     const code = readFileSync(codeFile, 'utf8').trim();
 
-    const anon = new ConnectorClient({ siteUrl, userAgent: 'TriCityWriter-e2e' });
+    console.log('Plugin updates');
+    const updater = JSON.parse(readFileSync(join(work, 'updater.json'), 'utf8')) as {
+      host: string;
+      update: { version?: string; package?: string; slug?: string } | false;
+      info_version: string | null;
+      rejected: string;
+    };
+    check('only admins, over HTTPS, can choose where updates come from', updater.rejected === '', updater.rejected);
+    check('Update URI routes update checks to our filter', updater.host === 'tricity-writer.invalid', updater.host);
+    check(
+      'the paired dashboard offers the new version and package',
+      updater.update !== false &&
+        updater.update.version === '9.9.9' &&
+        updater.update.slug === 'tricity-writer' &&
+        updater.update.package === 'https://example.com/downloads/tricity-writer.zip',
+      updater.update,
+    );
+    check('"View details" shows the offered version', updater.info_version === '9.9.9', updater.info_version);
+
+    // Playground listens on 127.0.0.1, which the production fetch refuses.
+    const localFetch = createSiteFetch({ allowPrivateNetworks: true });
+    const anon = new ConnectorClient({ siteUrl, userAgent: 'TriCityWriter-e2e', fetch: localFetch });
     console.log('Pairing');
     check('ping', (await anon.ping()).plugin === 'tricity-writer');
-    const paired = await anon.pair(code);
+    const paired = await anon.pair(code, 'https://example.com');
     check('pair returns a token', paired.token.startsWith('tcw_'));
     check('pair reports the SEO plugin', paired.site.seo_plugin === (seo ?? null), paired.site.seo_plugin);
     await rejectsWith('a pairing code works only once', anon.pair(code), 'tcw_invalid_code', 403);
 
-    const wp = new ConnectorClient({ siteUrl, token: paired.token, routeStyle: anon.routeStyle });
+    const wp = new ConnectorClient({ siteUrl, token: paired.token, routeStyle: anon.routeStyle, fetch: localFetch });
     const status = await wp.status();
     check('status: admin capabilities', status.capabilities.publish_posts && status.capabilities.upload_files);
 

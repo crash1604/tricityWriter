@@ -21,6 +21,7 @@ final class Plugin {
 		add_action( 'rest_api_init', array( Rest\Routes::class, 'register' ) );
 		add_filter( 'rest_post_dispatch', array( Rest\Routes::class, 'no_cache' ), 10, 3 );
 		Seo::boot();
+		Updater::boot();
 
 		if ( is_admin() ) {
 			Admin\Page::boot();

@@ -1,6 +1,8 @@
 import type { CoreDeps } from '@tricity/core';
+import { VERSION } from '@tricity/shared';
+import { sql } from 'drizzle-orm';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { type Auth, mcpResource, oauthEnabled } from './auth';
+import { type Auth, mcpResource, oauthEnabled, type SignupMode } from './auth';
 import { registerErrorHandler } from './http';
 import type { Mailer } from './mailer';
 import { registerMcp } from './mcp';
@@ -10,7 +12,7 @@ import { siteRoutes } from './routes/sites';
 import { workspaceRoutes } from './routes/workspace';
 import { registerAuthRoutes, requireSession } from './session';
 
-export const VERSION = '0.2.0';
+export { VERSION } from '@tricity/shared';
 
 export interface AppDeps {
   deps: CoreDeps;
@@ -18,6 +20,8 @@ export interface AppDeps {
   mailer: Mailer;
   // Public origin of the dashboard (same as Better Auth's baseURL).
   origin: string;
+  // How accounts are created; shown on the sign-up page. Defaults to open, no verification.
+  signup?: { mode: SignupMode; emailVerification: boolean };
 }
 
 // Builds the app without listening, so tests can use app.inject().
@@ -29,7 +33,21 @@ export function buildApp(appDeps: AppDeps, options: { logger?: boolean } = {}): 
     done(null, body),
   );
 
-  app.get('/health', async () => ({ ok: true, version: VERSION }));
+  // Liveness for Docker and uptime monitors: the API is up and can reach its database.
+  app.get('/health', async (_request, reply) => {
+    try {
+      await appDeps.deps.db.execute(sql`select 1`);
+      return { ok: true, version: VERSION };
+    } catch {
+      return reply.code(503).send({ ok: false, version: VERSION });
+    }
+  });
+  // What the sign-in and sign-up pages need to know before anyone is signed in.
+  app.get('/api/public/config', async () => ({
+    signupMode: appDeps.signup?.mode ?? 'open',
+    emailVerification: appDeps.signup?.emailVerification ?? false,
+    passwordResetByEmail: appDeps.mailer.delivers,
+  }));
   registerAuthRoutes(app, appDeps.auth);
 
   if (oauthEnabled(appDeps.origin)) {

@@ -1,11 +1,13 @@
 import { forOrg } from '@tricity/db';
 import type { AutoblogRunJob } from '@tricity/shared';
 import { z } from 'zod';
+import { orgKeys } from './ai-keys';
 import type { Actor, CoreDeps } from './deps';
-import { invalid, notFound } from './errors';
+import { AppError, invalid, notFound } from './errors';
 import { runGeneration } from './generation/pipeline';
 import { generationInputSchema, generationOptionsSchema } from './generation/types';
 import { isUuid } from './ids';
+import { assertPlatformBudget, plannedModels } from './limits';
 import { getSite } from './sites';
 import { getTemplate } from './templates';
 
@@ -109,12 +111,27 @@ export async function removeAutoblogTopic(deps: CoreDeps, actor: Actor, topicId:
 export async function triggerAutoblogRun(deps: CoreDeps, actor: Actor, siteId: string): Promise<void> {
   await getSite(deps, actor, siteId);
   const scope = forOrg(deps.db, actor.orgId);
-  if (!(await scope.autoblog.getProfile(siteId))) throw invalid('Save the auto-blogging settings first.');
+  const profile = await scope.autoblog.getProfile(siteId);
+  if (!profile) throw invalid('Save the auto-blogging settings first.');
   if ((await scope.autoblog.countQueued(siteId)) === 0) throw invalid('The topic queue is empty.');
+  await assertAutoblogBudget(deps, actor.orgId, profile.settings);
   await deps.jobs.autoblogRun({ orgId: actor.orgId, siteId, manual: true });
 }
 
-export type AutoblogRunResult = { generationId: string } | { skipped: 'no_profile' | 'disabled' | 'no_topics' };
+export type AutoblogRunResult =
+  | { generationId: string }
+  | { skipped: 'no_profile' | 'disabled' | 'no_topics' | 'over_budget' };
+
+// Over budget, a run would claim a topic only to fail it; leave the queue untouched instead.
+async function assertAutoblogBudget(deps: CoreDeps, orgId: string, settings: unknown): Promise<void> {
+  const keys = await orgKeys(deps, orgId);
+  await assertPlatformBudget(
+    deps,
+    orgId,
+    keys,
+    plannedModels(deps, keys, generationOptionsSchema.parse(settings ?? {})),
+  );
+}
 
 // Worker: one auto-blogging run for one site.
 export async function runAutoblog(deps: CoreDeps, job: AutoblogRunJob): Promise<AutoblogRunResult> {
@@ -122,6 +139,12 @@ export async function runAutoblog(deps: CoreDeps, job: AutoblogRunJob): Promise<
   const profile = await scope.autoblog.getProfile(job.siteId);
   if (!profile) return { skipped: 'no_profile' };
   if (!profile.enabled && !job.manual) return { skipped: 'disabled' };
+  try {
+    await assertAutoblogBudget(deps, job.orgId, profile.settings);
+  } catch (error) {
+    if (error instanceof AppError && error.code === 'quota_exceeded') return { skipped: 'over_budget' };
+    throw error;
+  }
 
   const topic = await scope.autoblog.claimNextTopic(job.siteId);
   if (!topic) return { skipped: 'no_topics' };

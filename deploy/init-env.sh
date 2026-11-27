@@ -37,11 +37,20 @@ POSTGRES_PASSWORD=$(openssl rand -hex 24)
 BETTER_AUTH_SECRET=$(secret)
 ENCRYPTION_KEY=$(secret)
 
+# Who can create accounts. invite = only the first account (yours) and people invited from
+# Settings → Workspace. open = anyone who finds the site.
+SIGNUP_MODE=invite
+
 # AI. Workspaces can also add their own keys in Settings → AI keys.
 ANTHROPIC_API_KEY=
 OPENAI_API_KEY=
 # false = workspaces must bring their own keys.
 ALLOW_PLATFORM_KEYS=true
+# USD each account may spend per month through the keys above, shared by all workspaces it owns
+# (empty = no cap). Workspaces using their own keys are never capped. Roughly \$0.15-0.40 per article with Claude Opus 5.5 and a featured image.
+PLATFORM_MONTHLY_BUDGET_USD=5
+# Articles one workspace may have queued or generating at once.
+MAX_ACTIVE_GENERATIONS=20
 AI_FAKE=false
 
 # Email: none = password reset links and invitations are written to the API log
@@ -49,5 +58,7 @@ AI_FAKE=false
 EMAIL_PROVIDER=none
 RESEND_API_KEY=
 EMAIL_FROM=TriCity Writer <no-reply@${domain:-example.com}>
+# With email set up, new accounts must confirm their address before signing in.
+REQUIRE_EMAIL_VERIFICATION=true
 EOF
 echo "Created deploy/.env for $origin"

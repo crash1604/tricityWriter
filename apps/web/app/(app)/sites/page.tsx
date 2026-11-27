@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { type FormEvent, useState } from 'react';
-import { SiteStatusBadge, timeAgo } from '../../../components/status';
+import { ConnectorUpdate, SiteStatusBadge, timeAgo, useLatestConnector } from '../../../components/status';
 import { Button, Card, EmptyState, ErrorText, Field, Input, Loading, PageHeader } from '../../../components/ui';
 import { api, type Site } from '../../../lib/api';
 
@@ -11,6 +11,7 @@ export default function SitesPage() {
   const queryClient = useQueryClient();
   const sites = useQuery({ queryKey: ['sites'], queryFn: () => api<{ sites: Site[] }>('/sites') });
   const [showConnect, setShowConnect] = useState(false);
+  const latestConnector = useLatestConnector();
 
   const pair = useMutation({
     mutationFn: (body: { url: string; code: string }) => api<{ site: Site }>('/sites/pair', { method: 'POST', body }),
@@ -39,7 +40,7 @@ export default function SitesPage() {
 
       {connectOpen && (
         <Card title="Connect a WordPress site" className="mb-6">
-          <div className="grid gap-8 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
             <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-600">
               <li>
                 <a href="/downloads/tricity-writer.zip" className="font-medium text-brand-600 hover:underline">
@@ -84,13 +85,13 @@ export default function SitesPage() {
       ) : list.length === 0 ? (
         <EmptyState title="No sites yet">Connect your first WordPress site to start writing.</EmptyState>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {list.map((site) => (
-            <Link
+            <div
               key={site.id}
-              href={`/sites/${site.id}`}
-              className="rounded-xl bg-white p-5 ring-1 ring-slate-200 transition hover:ring-brand-500"
+              className="relative rounded-xl bg-white p-5 ring-1 ring-slate-200 transition hover:ring-brand-500"
             >
+              <Link href={`/sites/${site.id}`} className="absolute inset-0 rounded-xl" aria-label={site.name} />
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{site.name}</p>
@@ -102,7 +103,10 @@ export default function SitesPage() {
                 WordPress {site.wpVersion ?? '?'} · SEO: {site.seoPlugin ?? 'none detected'} · checked{' '}
                 {timeAgo(site.lastCheckedAt)}
               </p>
-            </Link>
+              <div className="relative mt-1">
+                <ConnectorUpdate site={site} latest={latestConnector} />
+              </div>
+            </div>
           ))}
         </div>
       )}

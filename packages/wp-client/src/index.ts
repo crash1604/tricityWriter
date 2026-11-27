@@ -26,6 +26,9 @@ import {
   wpErrorSchema,
 } from '@tricity/shared';
 import { z } from 'zod';
+import { blockedAddressIn, createSiteFetch } from './network';
+
+export { BlockedAddressError, createSiteFetch, isPublicAddress, type SiteFetchOptions } from './network';
 
 // `pretty` = /wp-json/<route>; `query` = /?rest_route=/<route>, for sites where /wp-json/ is
 // rewritten to HTML (plain permalinks, broken rewrite rules, some security plugins).
@@ -55,7 +58,15 @@ export interface ConnectorClientOptions {
   // Skip discovery when the working style is already known (stored per site).
   routeStyle?: RouteStyle;
   userAgent?: string;
+  // Defaults to a fetch that refuses private and reserved addresses (see ./network).
   fetch?: typeof fetch;
+}
+
+let sharedSiteFetch: typeof fetch | undefined;
+// One guarded fetch (and connection pool) for every client that doesn't bring its own.
+function defaultSiteFetch(): typeof fetch {
+  if (!sharedSiteFetch) sharedSiteFetch = createSiteFetch();
+  return sharedSiteFetch;
 }
 
 export class ConnectorClient {
@@ -69,7 +80,7 @@ export class ConnectorClient {
     this.baseUrl = options.siteUrl.replace(/\/+$/, '');
     this.token = options.token;
     this.userAgent = options.userAgent;
-    this.fetchImpl = options.fetch ?? fetch;
+    this.fetchImpl = options.fetch ?? defaultSiteFetch();
     this.style = options.routeStyle;
   }
 
@@ -82,12 +93,12 @@ export class ConnectorClient {
     return this.request('GET', '/ping', pingResponseSchema);
   }
 
-  pair(code: string): Promise<PairResponse> {
-    return this.request('POST', '/pair', pairResponseSchema, { body: { code } });
+  pair(code: string, platformUrl?: string): Promise<PairResponse> {
+    return this.request('POST', '/pair', pairResponseSchema, { body: { code, platform_url: platformUrl } });
   }
 
-  status(): Promise<StatusResponse> {
-    return this.authed('GET', '/status', statusResponseSchema);
+  status(platformUrl?: string): Promise<StatusResponse> {
+    return this.authed('GET', '/status', statusResponseSchema, { query: { platform_url: platformUrl } });
   }
 
   // Revokes this client's own connection on the site.
@@ -191,6 +202,13 @@ export class ConnectorClient {
         redirect: 'manual',
       });
     } catch (error) {
+      if (blockedAddressIn(error)) {
+        throw new ConnectorError(
+          `${new URL(this.baseUrl).host} points to a private or reserved network address. Use the site's public address.`,
+          0,
+          'tcw_blocked_address',
+        );
+      }
       const reason = error instanceof Error ? error.message : String(error);
       throw new ConnectorError(`Could not reach ${this.baseUrl}: ${reason}`, 0, 'tcw_unreachable');
     }

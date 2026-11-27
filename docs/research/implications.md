@@ -38,7 +38,7 @@ The project owner can still revisit any of them. Everything in "Adopt" is implem
 - **Linking rule** for prompts: only link to URLs supplied in context or already verified on the site. Otherwise name the resource in plain text.
 - **Templates:** three kinds (content, design, image), matched by name plus the opening lines of the prompt. Per-site global content and design prompts.
 - **Auto-blogging modes:** assist (draft), guarded (publish if the on-page SEO score is at or above a threshold), autopilot. This needs an on-page SEO scorer in v1, because guarded mode depends on it.
-- **Deployment (later):** a fixed outbound IP, a published allowlist, and an identifying User-Agent with a contact address. Hosts and WAFs block anonymous servers.
+- **Deployment:** a fixed outbound IP, a published allowlist, and an identifying User-Agent with a contact address. Hosts and WAFs block anonymous servers. Since 1.0.0 the User-Agent is `TriCityWriter/<version> (+<dashboard origin>)`; a single VPS has a fixed IP, but no allowlist page is published yet.
 - **Later, not v1:**
   - a public "test my site" diagnostic page
   - a separate diagnostics plugin

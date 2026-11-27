@@ -14,13 +14,16 @@ import {
 export class OpenAIProvider implements TextProvider, ImageProvider {
   private readonly clients = new Map<string, OpenAI>();
 
+  // `fetch` is a test seam for checking what goes over the wire.
+  constructor(private readonly options: { fetch?: typeof fetch } = {}) {}
+
   async generateText(model: ModelSpec, credential: Credential, request: TextRequest): Promise<TextResult> {
     try {
       const response = await this.client(credential.apiKey).responses.create({
         model: model.providerModel,
         instructions: request.system,
         input: request.prompt,
-        max_output_tokens: request.maxOutputTokens ?? 32000,
+        max_output_tokens: request.maxOutputTokens ?? 64000,
       });
       if (response.status === 'incomplete') {
         const reason = response.incomplete_details?.reason ?? 'unknown';
@@ -28,14 +31,16 @@ export class OpenAIProvider implements TextProvider, ImageProvider {
           ? new AiError('refusal', 'The model declined this request.')
           : new AiError('truncated', `The model stopped early (${reason}).`);
       }
+      // OpenAI's input_tokens includes the cached ones; split them so each is priced once.
+      const cached = response.usage?.input_tokens_details.cached_tokens ?? 0;
       return {
         text: response.output_text,
         servedBy: response.model,
         usage: {
-          inputTokens: response.usage?.input_tokens ?? 0,
+          inputTokens: (response.usage?.input_tokens ?? 0) - cached,
           outputTokens: response.usage?.output_tokens ?? 0,
           cacheWriteTokens: 0,
-          cacheReadTokens: response.usage?.input_tokens_details.cached_tokens ?? 0,
+          cacheReadTokens: cached,
         },
       };
     } catch (error) {
@@ -63,7 +68,7 @@ export class OpenAIProvider implements TextProvider, ImageProvider {
 
   async verifyKey(apiKey: string): Promise<void> {
     try {
-      await new OpenAI({ apiKey, maxRetries: 0 }).models.list();
+      await new OpenAI({ apiKey, maxRetries: 0, fetch: this.options.fetch }).models.list();
     } catch (error) {
       throw toAiError(error);
     }
@@ -72,7 +77,7 @@ export class OpenAIProvider implements TextProvider, ImageProvider {
   private client(apiKey: string): OpenAI {
     let client = this.clients.get(apiKey);
     if (!client) {
-      client = new OpenAI({ apiKey });
+      client = new OpenAI({ apiKey, fetch: this.options.fetch });
       this.clients.set(apiKey, client);
     }
     return client;

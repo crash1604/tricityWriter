@@ -189,6 +189,21 @@ export interface UsageSummary {
     costMicroUsd: number;
   }[];
   totals: { inputTokens: number; outputTokens: number; images: number; costUsd: number };
+  // Spend through the platform's AI keys this month; budgetUsd null = no cap.
+  platform: { budgetUsd: number | null; usedUsd: number; since: string };
+}
+
+// GET /api/public/config: what the auth pages need before anyone is signed in.
+export interface PublicConfig {
+  signupMode: 'open' | 'invite';
+  emailVerification: boolean;
+  passwordResetByEmail: boolean;
+}
+
+export async function publicConfig(): Promise<PublicConfig> {
+  const response = await fetch('/api/public/config');
+  if (!response.ok) throw new ApiError('Could not load settings.', response.status, 'error');
+  return response.json();
 }
 
 export type Role = 'owner' | 'admin' | 'member';

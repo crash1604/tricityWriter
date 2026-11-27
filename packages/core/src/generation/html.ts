@@ -92,7 +92,8 @@ export function sanitizeArticleHtml(html: string): string {
         const [prop, ...value] = d.split(':');
         if (!prop || value.length === 0) return false;
         const v = value.join(':');
-        return !BLOCKED_CSS.test(prop.trim()) && !/url\s*\(|expression\s*\(|javascript:/i.test(v);
+        // Backslashes would let CSS escapes (\75 rl( = url() slip past the checks; articles never need them.
+        return !BLOCKED_CSS.test(prop.trim()) && !/url\s*\(|expression\s*\(|javascript:|\\/i.test(v);
       });
     return kept.length ? ` style="${kept.join(';')}"` : '';
   });

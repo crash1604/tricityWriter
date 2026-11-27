@@ -11,6 +11,8 @@ export type AppErrorCode =
   | 'site_disconnected'
   | 'ai_unavailable'
   | 'ai_error'
+  | 'quota_exceeded'
+  | 'too_many'
   | 'internal';
 
 const STATUS: Record<AppErrorCode, number> = {
@@ -23,6 +25,8 @@ const STATUS: Record<AppErrorCode, number> = {
   site_disconnected: 409,
   ai_unavailable: 503,
   ai_error: 502,
+  quota_exceeded: 402,
+  too_many: 429,
   internal: 500,
 };
 

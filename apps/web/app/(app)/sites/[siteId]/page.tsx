@@ -6,7 +6,13 @@ import { useParams, useRouter } from 'next/navigation';
 import { type FormEvent, useEffect, useState } from 'react';
 import { ArticleList } from '../../../../components/article-list';
 import { DEFAULT_OPTIONS, OptionsFields } from '../../../../components/options';
-import { isWorking, SiteStatusBadge, timeAgo } from '../../../../components/status';
+import {
+  ConnectorUpdate,
+  isWorking,
+  SiteStatusBadge,
+  timeAgo,
+  useLatestConnector,
+} from '../../../../components/status';
 import {
   Badge,
   Button,
@@ -87,6 +93,7 @@ export default function SitePage() {
 
 function Overview({ site }: { site: Site }) {
   const queryClient = useQueryClient();
+  const latestConnector = useLatestConnector();
   const check = useMutation({
     mutationFn: () => api<{ site: Site; status: SiteStatus | null }>(`/sites/${site.id}/check`, { method: 'POST' }),
     onSuccess: (data) => queryClient.setQueryData(['site', site.id], { site: data.site }),
@@ -99,7 +106,7 @@ function Overview({ site }: { site: Site }) {
   const caps = check.data?.status?.capabilities;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <Card
         title="Connection"
         actions={
@@ -114,7 +121,12 @@ function Overview({ site }: { site: Site }) {
           </Row>
           {site.statusMessage && <p className="text-xs text-red-600">{site.statusMessage}</p>}
           <Row label="WordPress">{site.wpVersion ?? '—'}</Row>
-          <Row label="Connector">{site.pluginVersion ?? '—'}</Row>
+          <Row label="Connector">
+            <span className="flex flex-col items-end gap-0.5">
+              {site.pluginVersion ?? '—'}
+              <ConnectorUpdate site={site} latest={latestConnector} />
+            </span>
+          </Row>
           <Row label="SEO plugin">{site.seoPlugin ?? 'None (we print meta tags ourselves)'}</Row>
           <Row label="Last checked">{timeAgo(site.lastCheckedAt)}</Row>
           {check.data?.status && <Row label="Acting as">{check.data.status.user.display_name}</Row>}
@@ -205,36 +217,38 @@ function Posts({ site }: { site: Site }) {
         <EmptyState title="Nothing found" />
       ) : (
         <>
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs text-slate-500">
-              <tr>
-                <th className="pb-2 font-medium">Title</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium">Words</th>
-                <th className="pb-2 font-medium">Image</th>
-                <th className="pb-2 font-medium">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {posts.data.items.map((p) => (
-                <tr key={p.id}>
-                  <td className="py-2 pr-4">
-                    <a href={p.link} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-                      {p.title || '(no title)'}
-                    </a>
-                  </td>
-                  <td className="py-2">
-                    <Badge tone={p.status === 'publish' ? 'green' : 'gray'}>{p.status}</Badge>
-                  </td>
-                  <td className={cx('py-2', p.word_count < 300 && 'text-amber-700')}>{p.word_count}</td>
-                  <td className="py-2">
-                    {p.has_featured_image ? '✓' : <span className="text-amber-700">missing</span>}
-                  </td>
-                  <td className="py-2 text-slate-500">{new Date(p.date_gmt).toLocaleDateString()}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-slate-500">
+                <tr>
+                  <th className="pb-2 font-medium">Title</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium">Words</th>
+                  <th className="pb-2 font-medium">Image</th>
+                  <th className="pb-2 font-medium">Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {posts.data.items.map((p) => (
+                  <tr key={p.id}>
+                    <td className="py-2 pr-4">
+                      <a href={p.link} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+                        {p.title || '(no title)'}
+                      </a>
+                    </td>
+                    <td className="py-2">
+                      <Badge tone={p.status === 'publish' ? 'green' : 'gray'}>{p.status}</Badge>
+                    </td>
+                    <td className={cx('py-2', p.word_count < 300 && 'text-amber-700')}>{p.word_count}</td>
+                    <td className="py-2">
+                      {p.has_featured_image ? '✓' : <span className="text-amber-700">missing</span>}
+                    </td>
+                    <td className="py-2 text-slate-500">{new Date(p.date_gmt).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
             <span>{posts.data.total} total</span>
             <div className="flex gap-2">
@@ -318,7 +332,7 @@ function Autoblog({ site }: { site: Site }) {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-5">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
       <div className="space-y-6 lg:col-span-3">
         <Card
           title="Schedule and publishing"
@@ -328,7 +342,7 @@ function Autoblog({ site }: { site: Site }) {
             </Button>
           }
         >
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <Field label="Auto-blogging">
               <Select value={profile.enabled ? 'on' : 'off'} onChange={(e) => set('enabled', e.target.value === 'on')}>
                 <option value="off">Off</option>

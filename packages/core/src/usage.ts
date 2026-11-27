@@ -1,7 +1,8 @@
 import { forOrg } from '@tricity/db';
 import type { Actor, CoreDeps } from './deps';
+import { platformAllowance } from './limits';
 
-// This calendar month's AI usage (UTC), by model. The basis for billing later.
+// This calendar month's AI usage (UTC), by model, plus what is left of the platform-key budget.
 export async function usageSummary(deps: CoreDeps, actor: Actor, now = new Date()) {
   const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const scope = forOrg(deps.db, actor.orgId);
@@ -19,5 +20,6 @@ export async function usageSummary(deps: CoreDeps, actor: Actor, now = new Date(
       images: byModel.reduce((s, r) => s + r.images, 0),
       costUsd: byModel.reduce((s, r) => s + r.costMicroUsd, 0) / 1_000_000,
     },
+    platform: await platformAllowance(deps, actor.orgId, now),
   };
 }

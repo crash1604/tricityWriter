@@ -17,3 +17,8 @@ export function loadRootEnv(start: string = process.cwd()): void {
     dir = parent;
   }
 }
+
+// For zod preprocess: an empty value (`NAME=` in an env file) means "not set", not zero or "".
+export function blankAsUnset(value: unknown): unknown {
+  return value === '' ? undefined : value;
+}

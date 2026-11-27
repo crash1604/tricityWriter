@@ -50,6 +50,7 @@ export function WorkspaceSettings() {
   const origin = useOrigin();
   const queryClient = useQueryClient();
   const admin = isAdmin(me.data);
+  const owner = me.data?.role === 'owner';
   const org = useQuery({
     queryKey: ['organization', me.data?.organizationId],
     queryFn: async () => {
@@ -117,7 +118,7 @@ export function WorkspaceSettings() {
 
   return (
     <Card title={`Workspace: ${org.data.name}`}>
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-slate-700">Members</h3>
           <ul className="divide-y divide-slate-100 text-sm">
@@ -128,22 +129,24 @@ export function WorkspaceSettings() {
                   <p className="truncate text-xs text-slate-500">{m.user.email}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {admin && m.role !== 'owner' && m.userId !== me.data?.user.id ? (
+                  {admin && m.userId !== me.data?.user.id && (m.role !== 'owner' || owner) ? (
                     <>
                       <Select
                         value={m.role}
                         className="w-32"
+                        aria-label={`Role of ${m.user.name}`}
                         onChange={(e) =>
                           run(() =>
                             authClient.organization.updateMemberRole({
                               memberId: m.id,
-                              role: e.target.value as 'member' | 'admin',
+                              role: e.target.value as Role,
                             }),
                           )
                         }
                       >
                         <option value="member">Member</option>
                         <option value="admin">Admin</option>
+                        {owner && <option value="owner">Owner</option>}
                       </Select>
                       <Button
                         variant="danger"
@@ -177,11 +180,12 @@ export function WorkspaceSettings() {
         </div>
 
         <div className="space-y-4">
+          {admin && <RenameWorkspace id={org.data.id} name={org.data.name} onSaved={refresh} />}
           {admin && (
             <>
               <h3 className="text-sm font-semibold text-slate-700">Invite a teammate</h3>
-              <form onSubmit={invite} className="flex items-end gap-2">
-                <div className="flex-1">
+              <form onSubmit={invite} className="flex flex-wrap items-end gap-2">
+                <div className="min-w-48 flex-1">
                   <Field label="Email">
                     <Input name="email" type="email" required />
                   </Field>
@@ -225,19 +229,131 @@ export function WorkspaceSettings() {
             </>
           )}
           <h3 className="pt-2 text-sm font-semibold text-slate-700">New workspace</h3>
-          <form onSubmit={createWorkspace} className="flex items-end gap-2">
-            <div className="flex-1">
-              <Field label="Name" hint="A separate space with its own sites, templates and keys.">
-                <Input name="name" placeholder="e.g. Client: Acme" />
-              </Field>
+          <form onSubmit={createWorkspace} className="space-y-1.5">
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Field label="Name">
+                  <Input name="name" placeholder="e.g. Client: Acme" />
+                </Field>
+              </div>
+              <Button type="submit" variant="secondary">
+                Create
+              </Button>
             </div>
-            <Button type="submit" variant="secondary">
-              Create
-            </Button>
+            <p className="text-xs text-slate-500">A separate space with its own sites, templates and keys.</p>
           </form>
         </div>
       </div>
+      {owner && (
+        <DeleteWorkspace
+          id={org.data.id}
+          name={org.data.name}
+          only={(me.data?.organizations.length ?? 1) <= 1}
+          onDeleted={async () => {
+            await queryClient.invalidateQueries();
+            router.push('/sites');
+          }}
+        />
+      )}
     </Card>
+  );
+}
+
+function RenameWorkspace({ id, name, onSaved }: { id: string; name: string; onSaved: () => Promise<void> }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = String(new FormData(event.currentTarget).get('name')).trim();
+    if (!next || next === name) return;
+    setBusy(true);
+    setError(null);
+    const result = await authClient.organization.update({ organizationId: id, data: { name: next } });
+    setBusy(false);
+    if (result.error) return setError(result.error.message ?? 'Could not rename the workspace.');
+    await onSaved();
+    await queryClient.invalidateQueries({ queryKey: ['me'] });
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Field label="Workspace name">
+            <Input name="name" defaultValue={name} key={name} required maxLength={80} />
+          </Field>
+        </div>
+        <Button type="submit" variant="secondary" busy={busy}>
+          Rename
+        </Button>
+      </div>
+      <ErrorText error={error} />
+    </form>
+  );
+}
+
+// Owners only. Typing the name guards against deleting the wrong workspace.
+function DeleteWorkspace({
+  id,
+  name,
+  only,
+  onDeleted,
+}: {
+  id: string;
+  name: string;
+  only: boolean;
+  onDeleted: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    const result = await authClient.organization.delete({ organizationId: id });
+    setBusy(false);
+    if (result.error) return setError(result.error.message ?? 'Could not delete the workspace.');
+    await onDeleted();
+  }
+
+  return (
+    <div className="mt-8 border-t border-slate-100 pt-5">
+      <h3 className="text-sm font-semibold text-red-700">Delete this workspace</h3>
+      {only ? (
+        <p className="mt-1 text-sm text-slate-500">
+          This is your only workspace. To remove everything, delete your account under Account below.
+        </p>
+      ) : !open ? (
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-500">
+            Removes its sites, articles, templates, keys and usage history for everyone, and disconnects its WordPress
+            sites. Posts already on WordPress stay there.
+          </p>
+          <Button variant="danger" onClick={() => setOpen(true)}>
+            Delete workspace
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 space-y-3 rounded-lg bg-red-50 p-3">
+          <Field label={`Type "${name}" to confirm`}>
+            <Input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+          </Field>
+          <ErrorText error={error} />
+          <div className="flex gap-2">
+            <Button variant="danger" busy={busy} disabled={typed.trim() !== name} onClick={remove}>
+              Delete forever
+            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -419,6 +535,59 @@ export function AccountSettings() {
           Change password
         </Button>
       </form>
+      <DeleteAccount />
     </Card>
+  );
+}
+
+function DeleteAccount() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const result = await authClient.deleteUser({ password: String(new FormData(event.currentTarget).get('password')) });
+    if (result.error) {
+      setBusy(false);
+      return setError(result.error.message ?? 'Could not delete your account.');
+    }
+    queryClient.clear();
+    router.replace('/sign-in');
+  }
+
+  return (
+    <div className="mt-6 border-t border-slate-100 pt-5">
+      <h3 className="text-sm font-semibold text-red-700">Delete your account</h3>
+      {!open ? (
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-500">
+            Workspaces you share stay with your teammates; workspaces only you use are deleted.
+          </p>
+          <Button variant="danger" onClick={() => setOpen(true)}>
+            Delete account
+          </Button>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="mt-2 space-y-3 rounded-lg bg-red-50 p-3">
+          <Field label="Your password" hint="This can't be undone.">
+            <Input name="password" type="password" required autoComplete="current-password" />
+          </Field>
+          <ErrorText error={error} />
+          <div className="flex gap-2">
+            <Button type="submit" variant="danger" busy={busy}>
+              Delete my account
+            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }

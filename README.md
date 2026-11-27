@@ -45,7 +45,6 @@ You need:
 ```sh
 git clone https://github.com/crash1604/tricityWriter.git
 cd tricityWriter
-git checkout teams-oauth-byok-deploy               # the 1.0.0 release
 
 ssh root@SERVER_IP 'bash -s' < deploy/bootstrap-vps.sh   # once per server: Docker, firewall, swap, backups
 deploy/deploy.sh root@SERVER_IP app.example.com          # build and start (omit the domain to use the IP)

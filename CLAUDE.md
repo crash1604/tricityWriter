@@ -139,6 +139,8 @@ packages/shared  Zod contracts: connector API, queue/job payloads; `/env` = serv
 packages/wp-client  ConnectorClient: the only code that calls WordPress sites
 plugins/tricity-writer   PHP connector plugin (not a pnpm workspace); zipped by scripts/build-plugin-zip.sh
 deploy/          docker-compose.yml, Caddyfile, bootstrap-vps.sh, init-env.sh, deploy.sh, backup.sh
+docs/            user-manual.md (end users: every feature, with the UI's labels and limits; update it when they
+                 change), deploy-godaddy.md (operators), research/ (clean-room findings)
 Dockerfile       targets "server" (api + worker + migrate) and "web" (Next standalone)
 ```
 

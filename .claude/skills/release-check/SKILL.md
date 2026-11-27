@@ -79,6 +79,7 @@ It does not cover the OS layer of the images (Debian slim, sharp's native binari
 
 - **Platform version:** `VERSION` in `packages/shared/src/version.ts` (shown by `/health` and MCP, sent in the User-Agent).
 - **Settings:** every new setting is in `.env.example` (local) and `deploy/init-env.sh` (production defaults). It is also documented in `docs/deploy-godaddy.md` when an operator might change it.
+- **User manual:** `docs/user-manual.md` describes every user-facing feature with the labels, defaults and limits the UI shows. New or renamed buttons, fields, statuses, MCP tools and user-facing error messages need an entry there.
 - **CLAUDE.md:** "Project status" and "Decisions" match what shipped. Per its own rule, update it in the same change.
 
 ## 6. Ship
